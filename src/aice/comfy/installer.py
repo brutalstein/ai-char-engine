@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -24,14 +25,29 @@ class InstallError(RuntimeError):
     pass
 
 
-def _run(cmd: list[str], *, cwd: Path | None = None, log: Progress | None = None) -> str:
+_TRANSIENT = ("could not resolve host", "temporary failure", "connection reset",
+              "timed out", "connection timed out", "failed to connect", "network is unreachable",
+              "unable to access", "ssl", "recv failure", "gnutls_handshake")
+
+
+def _run(cmd: list[str], *, cwd: Path | None = None, log: Progress | None = None,
+         retries: int = 3) -> str:
     if log:
         log("$ " + " ".join(str(c) for c in cmd))
-    proc = subprocess.run(cmd, cwd=str(cwd) if cwd else None, capture_output=True, text=True)
-    if proc.returncode != 0:
-        tail = (proc.stdout[-1500:] + proc.stderr[-1500:]).strip()
-        raise InstallError(f"command failed ({proc.returncode}): {' '.join(map(str, cmd))}\n{tail}")
-    return proc.stdout
+    last = ""
+    for attempt in range(1, retries + 1):
+        proc = subprocess.run(cmd, cwd=str(cwd) if cwd else None, capture_output=True, text=True)
+        if proc.returncode == 0:
+            return proc.stdout
+        last = (proc.stdout[-2000:] + proc.stderr[-2000:]).strip()
+        if attempt < retries and any(t in last.lower() for t in _TRANSIENT):
+            wait = 3 * attempt
+            if log:
+                log(f"  transient failure, retry {attempt + 1}/{retries} in {wait}s")
+            time.sleep(wait)
+            continue
+        break
+    raise InstallError(f"command failed: {' '.join(map(str, cmd))}\n{last}")
 
 
 def _git_sha(repo: Path) -> str:

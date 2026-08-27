@@ -15,7 +15,7 @@ This repo is a Codex plugin and repo-scoped skill. Treat the user as non-technic
 - Begin/resume with `aice guide`; surface its friendly question, not its internal commands.
 - Users can upload unlimited reference photos; keep accepting them until they say done.
 - Do not expose CLI mechanics in normal use.
-- Use built-in `image_gen`, not a custom Image API wrapper, by default.
+- Image generation is auto-routed: local ComfyUI backend when installed+validated, else built-in `image_gen` (never a paid Image API). The local runtime/models live in `~/.aice/runtime` and are private. See `.agents/skills/ai-char-engine/references/comfyui.md` for setup/debug only.
 - `.aice/` is private runtime state and must never be committed.
 - Prefer evidence/provenance over guesses. User-approved sources outrank generated ones.
 - Generated refs are candidates until quality-gated; no recursive untrusted lineage.

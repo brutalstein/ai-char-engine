@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import time
+import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -102,33 +104,41 @@ def download(
     """Resumable download to ``dest``. Skips work when an intact file already exists."""
 
     dest = Path(dest)
-    ok, _ = verify(dest, spec, check_hash=False)
-    if ok:
+    if verify(dest, spec, check_hash=False)[0]:
         return dest
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_suffix(dest.suffix + ".part")
-    have = part.stat().st_size if (resume and part.exists()) else 0
-    if have and spec.size_bytes and have >= spec.size_bytes:
-        have = 0  # corrupt/overlong partial, restart
 
-    req = urllib.request.Request(spec.url, headers={"User-Agent": "aice-comfy/1"})
-    if have:
-        req.add_header("Range", f"bytes={have}-")
-    mode = "ab" if have else "wb"
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        if have and resp.status != 206:  # server ignored Range
-            have, mode = 0, "wb"
-        total = spec.size_bytes or (int(resp.headers.get("Content-Length", 0)) + have)
-        done = have
-        with part.open(mode) as fh:
-            while True:
-                block = resp.read(4 * 1024 * 1024)
-                if not block:
-                    break
-                fh.write(block)
-                done += len(block)
-                if progress:
-                    progress(done, total)
+    attempts = 5
+    for attempt in range(1, attempts + 1):
+        have = part.stat().st_size if (resume and part.exists()) else 0
+        if have and spec.size_bytes and have >= spec.size_bytes:
+            part.unlink()  # corrupt/overlong partial
+            have = 0
+        req = urllib.request.Request(spec.url, headers={"User-Agent": "aice-comfy/1"})
+        if have:
+            req.add_header("Range", f"bytes={have}-")
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                mode = "ab" if have else "wb"
+                if have and resp.status != 206:  # server ignored Range
+                    have, mode = 0, "wb"
+                total = spec.size_bytes or (int(resp.headers.get("Content-Length", 0)) + have)
+                done = have
+                with part.open(mode) as fh:
+                    while True:
+                        block = resp.read(4 * 1024 * 1024)
+                        if not block:
+                            break
+                        fh.write(block)
+                        done += len(block)
+                        if progress:
+                            progress(done, total)
+            break
+        except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as exc:
+            if attempt == attempts:
+                raise OSError(f"{spec.filename}: download failed after {attempts} tries ({exc})") from None
+            time.sleep(3 * attempt)  # resume from the partial next loop
 
     if spec.size_bytes and part.stat().st_size != spec.size_bytes:
         raise OSError(f"{spec.filename}: downloaded {part.stat().st_size} != {spec.size_bytes}")
