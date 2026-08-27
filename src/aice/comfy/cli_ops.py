@@ -118,6 +118,10 @@ def doctor(*, smoke: bool = False) -> dict[str, Any]:
         report["smoke"] = _smoke_test(rt, hw)
         cfg["validated"] = bool(report["smoke"].get("ok"))
         cfg["smoke"] = report["smoke"]
+        winner = report["smoke"].get("winner")
+        if winner:
+            cfg["tuned"] = {"default_model": winner,
+                            "measured_at": report["smoke"].get("at")}
         cfgmod.save_config(cfg)
 
     report["checks"] = checks
@@ -125,7 +129,13 @@ def doctor(*, smoke: bool = False) -> dict[str, Any]:
     return report
 
 
+# A real generation slower than this is not usable interactively -> tune down.
+_SMOKE_LATENCY_CEILING_S = 300.0
+
+
 def _smoke_test(rt: ComfyRuntime, hw: hwmod.HardwareProfile) -> dict[str, Any]:
+    """Real GPU generation + a bounded auto-tune: run the profile default, and if
+    it fails or is too slow, try the tight-VRAM model. Records both, picks a winner."""
     import tempfile
     import time
     from pathlib import Path
@@ -133,33 +143,78 @@ def _smoke_test(rt: ComfyRuntime, hw: hwmod.HardwareProfile) -> dict[str, Any]:
     from ..providers.base import GenerationRequest
     from ..providers.comfyui import ComfyUIProvider
 
-    try:
-        with tempfile.TemporaryDirectory() as td:
-            ref = Path(td) / "smoke_ref.png"
-            ref.write_bytes(_tiny_png())
-            out = Path(td) / "out"
+    profile = policymod.profile_for(hw)
+    candidates: list[str] = [profile.default_model]
+    if profile.low_vram_model != profile.default_model:
+        candidates.append(profile.low_vram_model)
+
+    attempts: dict[str, Any] = {}
+    winner: str | None = None
+
+    with tempfile.TemporaryDirectory() as td:
+        ref = Path(td) / "smoke_ref.png"
+        ref.write_bytes(_tiny_png())
+        for key in candidates:
+            out = Path(td) / f"out_{key}"
             req = GenerationRequest(
                 character="smoke", prompt="a natural candid photo of a person, soft daylight",
                 reference_paths=(ref,), aspect="portrait", budget="balanced", seed=1234,
                 out_dir=out,
             )
             t0 = time.monotonic()
-            result = ComfyUIProvider(hardware=hw).generate(req)
-            return {
-                "ok": result.status == "ok" and result.output_path is not None,
-                "status": result.status,
-                "error": result.error,
-                "model_id": result.model_id,
-                "seed": result.seed,
-                "resolution": [result.effective_settings.get("width"), result.effective_settings.get("height")],
-                "duration_s": round(time.monotonic() - t0, 1),
-                "output_bytes": (result.output_path.stat().st_size if result.output_path and result.output_path.exists() else 0),
-            }
-    finally:
-        try:
-            rt.client().free()
-        except Exception:  # noqa: BLE001
-            pass
+            try:
+                cfg = cfgmod.load_config()
+                cfg["tuned"] = {"default_model": key}  # force this candidate for the run
+                result = ComfyUIProvider(config=cfg, hardware=hw).generate(req)
+                dt = round(time.monotonic() - t0, 1)
+                ok = result.status == "ok" and result.output_path is not None
+                attempts[key] = {
+                    "ok": ok, "status": result.status, "error": result.error,
+                    "duration_s": dt,
+                    "resolution": [result.effective_settings.get("width"),
+                                   result.effective_settings.get("height")],
+                    "output_bytes": (result.output_path.stat().st_size
+                                     if result.output_path and result.output_path.exists() else 0),
+                }
+            except Exception as exc:  # noqa: BLE001
+                attempts[key] = {"ok": False, "status": "crash", "error": repr(exc),
+                                 "duration_s": round(time.monotonic() - t0, 1)}
+            finally:
+                try:
+                    rt.client().free()
+                    time.sleep(3)
+                except Exception:  # noqa: BLE001
+                    pass
+            a = attempts[key]
+            if a["ok"] and a["duration_s"] <= _SMOKE_LATENCY_CEILING_S:
+                winner = key
+                break  # default (or first) is good enough; no need to try smaller
+
+    if winner is None:  # nothing hit the ceiling; accept any that produced an image
+        winner = next((k for k, a in attempts.items() if a["ok"]), None)
+
+    best = attempts.get(winner, {}) if winner else {}
+    return {
+        "ok": winner is not None,
+        "winner": winner,
+        "gpu": hw.gpu_name,
+        "vram_total_mb": hw.vram_total_mb,
+        "status": best.get("status", "failed"),
+        "error": best.get("error", "") or "; ".join(
+            f"{k}: {a.get('error')}" for k, a in attempts.items() if a.get("error")),
+        "model_id": winner or "",
+        "seed": 1234,
+        "resolution": best.get("resolution"),
+        "duration_s": best.get("duration_s"),
+        "output_bytes": best.get("output_bytes", 0),
+        "attempts": attempts,
+        "at": _utc(),
+    }
+
+
+def _utc() -> str:
+    import time
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
 def _tiny_png() -> bytes:

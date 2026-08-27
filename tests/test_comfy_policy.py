@@ -66,6 +66,14 @@ class PolicyTests(unittest.TestCase):
         tight = policy.resolve_settings(_hw(), budget="balanced", free_vram_mb=3800)
         self.assertEqual(tight.model_id, policy.QWEN_EDIT_2509_GGUF_Q3KM)
 
+    def test_tuned_model_overrides_default_but_not_low_vram(self) -> None:
+        pinned = policy.resolve_settings(_hw(), budget="balanced", free_vram_mb=6000,
+                                         tuned_model=policy.QWEN_EDIT_2509_GGUF_Q3KM)
+        self.assertEqual(pinned.model_id, policy.QWEN_EDIT_2509_GGUF_Q3KM)
+        junk = policy.resolve_settings(_hw(), budget="balanced", free_vram_mb=6000,
+                                       tuned_model="not-a-real-key")
+        self.assertEqual(junk.model_id, policy.QWEN_EDIT_2509_GGUF_Q4KS)
+
     def test_full_body_scene_changes_bucket(self) -> None:
         portrait = policy.resolve_settings(_hw(), aspect="portrait", scene_tags=("face",))
         body = policy.resolve_settings(_hw(), aspect="portrait", scene_tags=("full_body", "legs"))

@@ -24,12 +24,14 @@ Stack (chosen for an 8 GB Blackwell laptop; all Apache-2.0):
 
 ```
 aice comfy setup            # idempotent: clone + venv + torch(cu130) + node + models
-aice comfy doctor --smoke   # real GPU generation; marks the backend validated on success
+aice comfy doctor --smoke   # real GPU generation; validates + tunes the default model
 ```
 
 `setup` is safe to re-run — intact files and installed packages are skipped.
-If `doctor --smoke` fails, the backend stays unvalidated and `auto` keeps using
-`image_gen`; report the one-line error, do not loop.
+`doctor --smoke` runs the profile's default model once and, if it fails or is
+too slow, the tight-VRAM model; the survivor is pinned in `comfy.json` `tuned`.
+If nothing produces an image the backend stays unvalidated and `auto` keeps
+using `image_gen`; report the one-line error, do not loop.
 
 ## Normal generation
 

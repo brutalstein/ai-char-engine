@@ -152,6 +152,7 @@ def resolve_settings(
     scene_tags: tuple[str, ...] = (),
     ref_count: int = 1,
     free_vram_mb: int | None = None,
+    tuned_model: str | None = None,
 ) -> EffectiveSettings:
     profile = profile_for(hw)
     tight_vram = (
@@ -159,7 +160,9 @@ def resolve_settings(
         and free_vram_mb < profile.vram_floor_mb + profile.vram_headroom_mb
     )
     use_low = budget == "economy" or tight_vram or ref_count >= 3 and budget != "quality"
-    model_id = profile.low_vram_model if use_low else profile.default_model
+    # A passing smoke/bench may pin a machine-measured default (comfy.json "tuned").
+    base_model = tuned_model if tuned_model in MODEL_SAMPLER else profile.default_model
+    model_id = profile.low_vram_model if use_low else base_model
     sampler = MODEL_SAMPLER[model_id]
 
     w, h = BUCKETS[_aspect_from_scene(aspect, scene_tags)]

@@ -106,6 +106,7 @@ class ComfyUIProvider(ImageProvider):
         settings = policymod.resolve_settings(
             self.hw, aspect=req.aspect, budget=req.budget,
             scene_tags=tuple(req.scene_tags), ref_count=len(refs), free_vram_mb=free_vram,
+            tuned_model=self.cfg.get("tuned", {}).get("default_model"),
         )
         spec = modelmod.model_specs()[settings.model_id]
         model_dest = spec.dest(self.models_dir)
