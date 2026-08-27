@@ -155,6 +155,11 @@ def _smoke_test(rt: ComfyRuntime, hw: hwmod.HardwareProfile) -> dict[str, Any]:
         ref = Path(td) / "smoke_ref.png"
         ref.write_bytes(_tiny_png())
         for key in candidates:
+            try:  # the tune legitimately needs this candidate now
+                ComfyInstaller(cfgmod.load_config()).ensure_models([key])
+            except InstallError as exc:
+                attempts[key] = {"ok": False, "status": "download_failed", "error": str(exc)}
+                continue
             out = Path(td) / f"out_{key}"
             req = GenerationRequest(
                 character="smoke", prompt="a natural candid photo of a person, soft daylight",
@@ -190,8 +195,9 @@ def _smoke_test(rt: ComfyRuntime, hw: hwmod.HardwareProfile) -> dict[str, Any]:
                 winner = key
                 break  # default (or first) is good enough; no need to try smaller
 
-    if winner is None:  # nothing hit the ceiling; accept any that produced an image
-        winner = next((k for k, a in attempts.items() if a["ok"]), None)
+    if winner is None:  # nothing beat the ceiling; take the fastest that made an image
+        made = [(a["duration_s"], k) for k, a in attempts.items() if a["ok"]]
+        winner = min(made)[1] if made else None
 
     best = attempts.get(winner, {}) if winner else {}
     return {
