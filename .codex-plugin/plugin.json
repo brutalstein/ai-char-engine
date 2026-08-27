@@ -1,0 +1,23 @@
+{
+  "name": "ai-char-engine",
+  "version": "0.1.0",
+  "description": "Persistent, token-efficient virtual-character identity orchestration for Codex image generation.",
+  "repository": "https://github.com/brutalstein/ai-char-engine",
+  "license": "MIT",
+  "keywords": ["codex", "imagegen", "virtual-creator", "character-consistency", "photorealistic"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "AI Character Engine",
+    "shortDescription": "Keep one virtual character visually consistent.",
+    "longDescription": "Build a trusted reference pack from a seed, maintain a compact identity brain, select only relevant references, reduce repeated poses, and generate consistent virtual-creator photography with Codex built-in image generation.",
+    "developerName": "Cenker Usta",
+    "category": "Productivity",
+    "capabilities": ["Interactive", "Write"],
+    "websiteURL": "https://github.com/brutalstein/ai-char-engine",
+    "defaultPrompt": [
+      "Bootstrap my virtual character from this seed image.",
+      "Generate a candid photo of my character from this prompt.",
+      "Inspect my character references and fill missing angles."
+    ]
+  }
+}
