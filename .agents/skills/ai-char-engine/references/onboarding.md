@@ -11,7 +11,7 @@ Make onboarding feel like a guided creative assistant. The user never needs to k
 1. Create state with origin `scratch`.
 2. Ask for a natural-language appearance description only if the conversation does not already contain one.
 3. Generate one primary seed with built-in `image_gen`.
-4. Because a generated initial seed has no trusted parent yet, save the image to a workspace path and register it by first creating a user-facing approval checkpoint. The CLI intentionally forbids ordinary parentless generated references; for the seed, once the user says they want this exact generated person, treat that explicit approval as user evidence and register the file as `user_uploaded`/golden with notes stating `approved generated seed`. This is a semantic trust transition: the user's approval, not the model output itself, makes it source-of-truth.
+4. Because a generated initial seed has no trusted parent yet, keep it outside the identity bank until the user approves it. After explicit approval, run `aice approve-seed <character> <image-path> --tags <visible-tags>`. This dedicated path stores it as `generated_approved` + golden. The user's approval, not the raw model output, is what creates source-of-truth status.
 5. Build the brain from the approved seed.
 6. Expand face angles lazily.
 7. If body geometry is missing, propose exactly one full-body front anchor and require approval before side/back expansion.
