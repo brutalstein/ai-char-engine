@@ -1,310 +1,113 @@
 ---
 name: ai-char-engine
-description: Maintain one persistent adult synthetic visual character across many GPT-Image generations with a compact local identity brain, trusted multi-angle references, anti-repetition memory, bounded validation, and no separate OpenAI API key. Use when the user wants to bootstrap, expand, inspect, or generate new photos of the same virtual creator/persona in Codex.
+description: Interactive persistent-character workflow for Codex. Guides a non-technical user from zero or from any number of reference photos, builds an evidence-grounded identity brain, expands trusted views only when needed, and generates new photorealistic images with bounded context and repair cost.
 ---
 
 # AI Character Engine
 
-This skill is a Codex-native orchestration layer around the built-in system `imagegen` capability. The deterministic Python CLI owns state; Codex owns semantic reasoning and visual inspection; the built-in `image_gen` tool owns generation/editing.
+Act like a polished interactive product, not a CLI tutorial. The user should never need to know project commands, file layouts, prompt engineering, or reference-selection rules.
 
-## Non-negotiable architecture
+## Product contract
 
-- Default image backend: Codex built-in `image_gen` through the system `imagegen` skill.
-- Do **not** use the Image API, `OPENAI_API_KEY`, or a custom SDK runner unless the user explicitly asks to leave the Codex built-in path.
-- Keep the character state under `.aice/`; it is local/private and gitignored by default.
-- Treat user-approved uploaded references as the source of truth. Generated references are candidates until they pass the quality gate.
-- Never recursively derive new trusted references from untrusted candidates.
-- Never hallucinate invisible permanent details. If a tattoo, birthmark, jewelry item, body geometry, or facial feature is not grounded by trusted evidence, leave it unknown.
-- The engine is intentionally restricted to adult synthetic/original/authorized characters. Do not use it to impersonate a real person without permission.
-- Optimize for **consistency per model call**, not maximum agent activity.
+- Always guide the user in ordinary language.
+- Never dump internal `aice` commands unless the user explicitly asks for troubleshooting/developer details.
+- Run all internal commands yourself.
+- Start/resume every workflow by running `aice guide [character]`; treat its `stage` as the deterministic onboarding state.
+- Ask only the question needed for the current stage. Do not front-load a questionnaire.
+- The user may upload **any number of reference photos**. Process each one, then continue accepting more until they say they are done.
+- Default image backend is Codex built-in `image_gen`; do not require an OpenAI API key.
+- Keep `.aice/` private/local. Never commit character photos or identity state.
+- Adult synthetic/original/authorized characters only. Do not use the workflow to impersonate a real person without permission.
 
-## First-run setup
+## First activation
 
-From repo root:
+If `aice` is unavailable, silently install the local package from repo root:
 
 ```bash
 python -m pip install -e .
+```
+
+Then run:
+
+```bash
 aice doctor
+aice guide
 ```
 
-If `aice` already works, do not reinstall it.
+Do not ask the user to run these commands.
 
-## Modes
+## Interactive stages
 
-Infer one of these modes from the user's request:
+Follow `aice guide` exactly.
 
-1. `bootstrap` — create a new character from a user image or a freshly generated seed.
-2. `expand` — fill missing trusted reference angles only.
-3. `generate` — create a new lifestyle/social photo from a short user prompt.
-4. `inspect` — show compact profile/reference/history state without generating.
+### `choose_origin`
+Ask whether they want:
+1. a new character from scratch, or
+2. an existing character built from their reference photos.
 
-Do not ask the user to restate information that is already in `.aice`.
+After the choice, ask for a character name only if one was not already supplied, then run `aice begin <name> --origin scratch|references`.
 
----
+### `describe_seed`
+Ask the user to describe the person naturally. Do not make them fill fields. Normalize their description into one strong photorealistic seed prompt and call built-in `image_gen` once.
 
-# Bootstrap workflow
+Register the generated image as a **candidate** with a trusted-parent exception only for the initial seed workflow described in `references/onboarding.md`. Show the image and ask whether to keep or regenerate it. Never silently make an unapproved generated person identity truth.
 
-## A. Create the character state
+### `approve_seed`
+If accepted, validate obvious anatomy/identity quality, promote the seed to golden with explicit user approval, and continue. If rejected, discard/reject it and generate one replacement based on the user's correction.
 
-```bash
-aice init <character-name>
-```
+### `collect_references`
+Tell the user they can upload as many photos as they want and that different angles/detail shots help. Each time images arrive:
 
-If the user supplied a seed image, inspect it with `view_image` **before** registering it. Determine only visible evidence tags such as:
+1. inspect each image visually;
+2. assign only visible evidence tags;
+3. register user-supplied images as golden references;
+4. cache the visual analysis by reference SHA;
+5. briefly acknowledge how many were added;
+6. ask whether they want to upload more or are done.
 
-- `face`
-- `front`
-- `upper_body`
-- `full_body`
-- `side`
-- `back`
-- `hands`
-- `arms`
-- `legs`
+When they say done, run `aice refs-done <character>`.
 
-Then register it, for example:
+### `build_brain`
+Load `references/brain.md`. Build the evidence ledger from golden/trusted references. Never guess invisible traits. Use cached analysis when available. Store observations with exact source reference IDs so every stable fact has provenance.
 
-```bash
-aice seed <character> <seed-path> --tags face,front,upper_body
-```
+### `resolve_conflicts`
+Show only ambiguous facts, in plain language. Ask the user which value is correct. Lock their answer with `aice lock-fact`. Do not ask them to review facts that already have clear evidence.
 
-If there is no user seed, use the built-in `image_gen` tool once to create a primary adult synthetic seed, show it to the user, and only after acceptance register it as the seed.
+### `optional_body_anchor`
+Explain briefly that current photos do not establish full-body geometry. Offer to create one proposed full-body anchor or skip it. If generated, it remains candidate until the user explicitly approves it. Only then may side/back body references derive from it.
 
-## B. Build the compact identity brain
+### `ready_to_finish`
+Run `aice mark-ready <character>` without exposing the command. Tell the user the character is ready and invite a normal-language photo request.
 
-Run:
+### `ready`
+Normal generation mode. The user should only need to describe the desired photo.
 
-```bash
-aice profile-template <character>
-```
+For full onboarding mechanics and the initial generated-seed exception, read `references/onboarding.md` only when onboarding is active.
 
-Inspect all user-approved golden references with `view_image`. Fill only grounded facts into a small JSON patch and apply it with:
+## Normal generation
 
-```bash
-aice set-profile <character> --json <json-file>
-```
+1. Run `aice context <character> "<request>" --budget balanced --compact`.
+2. If `coverage_gaps` contains geometry that matters to the request, lazily expand only that missing coverage; do not fake confidence.
+3. Load only the selected golden/trusted reference images.
+4. Run `aice prompt <character> "<request>" --budget balanced` and use it as the base image prompt. At most one small semantic refinement is allowed.
+5. Call built-in `image_gen` once.
+6. Validate according to the returned budget policy. Use `pass/warn/fail`, not fake similarity percentages.
+7. If a hard invariant fails and `max_repairs` allows it, perform one targeted edit only. Never loop indefinitely.
+8. Record only the final image plus a tiny content fingerprint (`shot`, `angle`, `gaze`, `pose`, `environment`, `lighting`, `outfit`).
 
-Prioritize stable traits:
+## Cost and token discipline
 
-- adult age range, not an exact age unless explicitly established
-- facial structure traits that are visibly stable
-- skin tone / undertone
-- natural hair color and stable hairline traits
-- eye color when actually visible
-- stable body description only if body evidence exists
-- permanent features (tattoo, birthmark, piercing) only when visible and unambiguous
-- `visibility_tags` for permanent features, e.g. `hands`, `arms`, `left_wrist`
-- current mutable state only when the user explicitly wants continuity over time
+- Deterministic Python decides state, references, budgets, cache, lineage, history, and conflicts.
+- Never ask another model which references to use.
+- Never send the full reference bank or full history.
+- Never re-analyze an unchanged reference if its SHA cache exists.
+- Mention permanent details only when their visibility tags match the requested composition.
+- Default to 2-3 relevant references in balanced mode.
+- One image call is the normal path; one repair is the bounded exception.
+- Do not use subagents for ordinary generations.
 
-Keep descriptions concise. Do not write prose biographies into `character.json`.
+## Brain invariant
 
-## C. Expand references lazily
+The character brain is an **evidence graph**, not a prose description. A resolved stable fact must be supported by golden/trusted evidence or explicitly asserted/locked by the user. Near-tied evidence must become a conflict rather than a guess.
 
-Run:
-
-```bash
-aice bootstrap-plan <character>
-```
-
-Process only the returned `missing` tasks. Do not generate blocked roles.
-
-For each task:
-
-1. `view_image` the returned `anchor_path`.
-2. Use built-in `image_gen` with the task prompt.
-3. Move/copy the generated result from Codex's generated-images location into a normal accessible workspace path if needed.
-4. Register it as a candidate:
-
-```bash
-aice add-ref <character> <image-path> \
-  --role <role> \
-  --source generated \
-  --tier candidate \
-  --tags <comma-separated-tags> \
-  --parents <anchor-id>
-```
-
-5. Inspect candidate and trusted anchor(s) with `view_image`.
-6. Evaluate exactly these required checks:
-   - `identity`: same recognizable character, no face redesign
-   - `anatomy`: plausible, clean anatomy for the visible crop
-   - `stable_traits`: no unsupported drift in grounded skin/hair/body/permanent features
-7. If all pass, promote to trusted:
-
-```bash
-aice promote-ref <character> <ref-id> \
-  --checks '{"identity":"pass","anatomy":"pass","stable_traits":"pass"}'
-```
-
-If any required check fails, reject it instead of retrying indefinitely:
-
-```bash
-aice reject-ref <character> <ref-id> --reason "<short reason>"
-```
-
-### High-extrapolation rule
-
-If `bootstrap-plan` marks `requires_user_approval: true`, the trusted evidence did not actually establish that geometry (commonly a full body inferred from a portrait).
-
-Generate at most **one** proposed anchor. Show it to the user. Do not use it to derive side/back body references until the user accepts it. On explicit approval, promote it to golden:
-
-```bash
-aice promote-ref <character> <ref-id> \
-  --checks '{"identity":"pass","anatomy":"pass","stable_traits":"pass"}' \
-  --golden --user-approved
-```
-
-This prevents synthetic extrapolation from silently becoming identity truth.
-
----
-
-# Normal generation workflow
-
-The user should be able to say something short such as:
-
-> cafe in Milan, rainy afternoon, candid friend-taken photo
-
-## 1. Compile minimal context
-
-Default to balanced:
-
-```bash
-aice context <character> "<user request>" --budget balanced --compact
-```
-
-Available budgets:
-
-- `economy`: at most 2 refs, smallest history context, critical-only validation, no repair loop
-- `balanced`: at most 3 refs, compact anti-repetition memory, one light validation, max 1 targeted repair
-- `quality`: at most 4 refs, larger context, full validation, max 1 targeted repair
-
-Never load the full history or full reference bank into context.
-
-If `coverage_gaps` is non-empty, do not silently pretend the identity bank covers that geometry. For `side`, `back`, or `full_body` gaps, run `aice bootstrap-plan <character>` and lazily fill a grounded missing reference first when possible. If the only path is a `high-extrapolation` anchor, generate at most one proposal and require explicit user approval before making it identity truth. A missing `face` anchor is a hard stop: request/register a trusted face reference.
-
-## 2. Load only selected references
-
-For each path in `references`, call `view_image` in the listed order. Do not load candidate/rejected references for normal generation.
-
-## 3. Compile the generation prompt
-
-Use:
-
-```bash
-aice prompt <character> "<user request>" --budget <budget>
-```
-
-Use this as the base prompt. You may make **one small semantic refinement** when the user's wording needs scene interpretation, but do not turn it into a giant prompt.
-
-Preserve these principles:
-
-- same exact adult synthetic character
-- reference images are identity references, not edit targets
-- only visible permanent details are mentioned
-- candid/natural camera language when appropriate
-- explicit anti-repetition hints from recent history
-- realistic anatomy, skin, optics, and lighting
-- no gratuitous body exaggeration
-- no text/watermark unless explicitly requested
-
-## 4. Generate once
-
-Use the built-in `image_gen` tool once.
-
-Do not produce multiple speculative variants unless the user requested variants.
-
-## 5. Adaptive validation
-
-### economy
-
-Inspect only if there is an obvious identity/anatomy concern or the scene exposes a critical permanent detail.
-
-### balanced
-
-Inspect final once against the loaded references. Check:
-
-- recognizable face/identity
-- grounded skin/hair continuity
-- stable body continuity where visible
-- permanent visible details
-- obvious anatomy/artifact failures
-- repeated pose/gaze if anti-repetition constraints were active
-
-### quality
-
-Perform the balanced checks plus composition, perspective, hands, and all visible permanent details.
-
-Use ordinal results (`pass`, `warn`, `fail`) rather than pretending to have scientifically calibrated face-similarity percentages.
-
-If a hard invariant fails and the budget allows repair, perform **one targeted edit** with built-in image generation/edit semantics. Repeat the invariants and change only the failed property. Never enter an open-ended regenerate loop.
-
-## 6. Persist only the final
-
-Create a tiny content fingerprint with these fields when known:
-
-```json
-{
-  "shot": "waist-up",
-  "angle": "3q-right",
-  "gaze": "away",
-  "pose": "walking",
-  "environment": "old-town-street",
-  "lighting": "late-afternoon",
-  "outfit": "red-shirt"
-}
-```
-
-Record the final path:
-
-```bash
-aice record <character> <final-image-path> \
-  --prompt "<original user request>" \
-  --fingerprint '<compact-json>' \
-  --validation '<compact-pass-warn-fail-json>' \
-  --status approved \
-  --budget <budget>
-```
-
-Do not keep rejected built-in variants in the character output folders unless the user asks.
-
----
-
-# Token/call optimization rules
-
-These rules are mandatory:
-
-1. Prefer deterministic Python over extra model calls.
-2. Never ask another model which refs to use; `aice context` already does deterministic selection.
-3. Do not resend the full character profile when selected image references carry the identity.
-4. Do not resend history images. Use only compact fingerprints from history.
-5. Do not analyze the same reference repeatedly for metadata if its SHA-256 has not changed.
-6. Use candidate references only for candidate validation, never normal generation.
-7. Expand the reference bank on demand, not preemptively.
-8. Default to `balanced` unless the user asks for lowest usage or maximum quality.
-9. One generation is the normal path; one targeted repair is the bounded exception path.
-10. Do not use subagents for ordinary generations.
-11. Keep prompt augmentation short; preserve the user's intent instead of inventing a story.
-12. If a detail is not visible in the requested composition, omit it from active prompt context.
-
----
-
-# Inspect / maintenance
-
-Useful commands:
-
-```bash
-aice list-refs <character>
-aice stats <character>
-aice context <character> "<request>" --budget balanced --compact
-aice bootstrap-plan <character>
-```
-
-If the user explicitly changes a persistent trait (for example, cuts hair), update `mutable_state`. Do not overwrite immutable identity traits.
-
-If the user uploads a stronger identity reference, register it as `user_uploaded`. It may be golden because it is explicit user evidence. Generated images never become golden without explicit user approval.
-
-# Success criterion
-
-A successful run is not "the model called many tools." It is:
-
-> the fewest reasonable model/image calls that produce a believable new photo of the same persistent adult synthetic person, with no silent identity drift and no repetitive visual pattern.
+Read `references/brain.md` only when building or repairing the brain.
