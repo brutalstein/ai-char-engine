@@ -1,23 +1,23 @@
 {
   "name": "ai-char-engine",
-  "version": "0.1.0",
-  "description": "Persistent, token-efficient virtual-character identity orchestration for Codex image generation.",
+  "version": "0.2.0",
+  "description": "Interactive evidence-grounded persistent character engine for Codex image generation.",
   "repository": "https://github.com/brutalstein/ai-char-engine",
   "license": "MIT",
-  "keywords": ["codex", "imagegen", "virtual-creator", "character-consistency", "photorealistic"],
+  "keywords": ["codex", "imagegen", "character-consistency", "virtual-creator", "identity-memory"],
   "skills": "./.agents/skills/",
   "interface": {
     "displayName": "AI Character Engine",
-    "shortDescription": "Keep one virtual character visually consistent.",
-    "longDescription": "Build a trusted reference pack from a seed, maintain a compact identity brain, select only relevant references, reduce repeated poses, and generate consistent virtual-creator photography with Codex built-in image generation.",
+    "shortDescription": "Build and keep one visual character consistent.",
+    "longDescription": "An interactive Codex workflow that guides non-technical users from a new character or unlimited reference photos, builds an evidence-grounded identity brain with provenance and conflict handling, expands trusted views lazily, and generates consistent photorealistic images with bounded context and repair cost.",
     "developerName": "Cenker Usta",
     "category": "Productivity",
     "capabilities": ["Interactive", "Write"],
     "websiteURL": "https://github.com/brutalstein/ai-char-engine",
     "defaultPrompt": [
-      "Bootstrap my virtual character from this seed image.",
-      "Generate a candid photo of my character from this prompt.",
-      "Inspect my character references and fill missing angles."
+      "Help me create a new character from scratch.",
+      "I already have a character. Guide me through references.",
+      "Generate a new photo of my saved character."
     ]
   }
 }
