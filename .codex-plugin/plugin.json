@@ -5,7 +5,7 @@
   "repository": "https://github.com/brutalstein/ai-char-engine",
   "license": "MIT",
   "keywords": ["codex", "imagegen", "virtual-creator", "character-consistency", "photorealistic"],
-  "skills": "./skills/",
+  "skills": "./.agents/skills/",
   "interface": {
     "displayName": "AI Character Engine",
     "shortDescription": "Keep one virtual character visually consistent.",

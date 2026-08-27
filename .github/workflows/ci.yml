@@ -26,8 +26,11 @@ jobs:
         run: python -m pip install -e .
       - name: Compile Python sources
         run: python -m compileall -q src
-      - name: Validate plugin manifest
-        run: python -m json.tool .codex-plugin/plugin.json > /dev/null
+      - name: Validate Codex files
+        run: |
+          python -m json.tool .codex-plugin/plugin.json > /dev/null
+          test -f .agents/skills/ai-char-engine/SKILL.md
+          grep -q '^name: ai-char-engine$' .agents/skills/ai-char-engine/SKILL.md
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
       - name: Doctor
