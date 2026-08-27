@@ -10,11 +10,12 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11", "3.13"]
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
@@ -24,14 +25,15 @@ jobs:
           cache: pip
       - name: Install package
         run: python -m pip install -e .
-      - name: Compile Python sources
-        run: python -m compileall -q src
-      - name: Validate Codex files
-        run: |
-          python -m json.tool .codex-plugin/plugin.json > /dev/null
-          test -f .agents/skills/ai-char-engine/SKILL.md
-          grep -q '^name: ai-char-engine$' .agents/skills/ai-char-engine/SKILL.md
-      - name: Run unit tests
+      - name: Compile sources
+        run: python -m compileall -q src scripts
+      - name: Validate plugin
+        run: python scripts/validate_plugin.py
+      - name: Unit tests
         run: python -m unittest discover -s tests -v
       - name: Doctor
         run: aice doctor
+      - name: Interactive guide smoke test
+        run: |
+          aice --home .ci-aice begin CICharacter --origin references
+          aice --home .ci-aice guide cicharacter
