@@ -50,10 +50,10 @@ After the choice, ask for a character name only if one was not already supplied,
 ### `describe_seed`
 Ask the user to describe the person naturally. Do not make them fill fields. Normalize their description into one strong photorealistic seed prompt and call built-in `image_gen` once.
 
-Register the generated image as a **candidate** with a trusted-parent exception only for the initial seed workflow described in `references/onboarding.md`. Show the image and ask whether to keep or regenerate it. Never silently make an unapproved generated person identity truth.
+Keep the generated seed outside the trusted reference bank while it is awaiting approval. Show it and ask whether to keep or regenerate it. If the user accepts it, use the dedicated `aice approve-seed` path described in `references/onboarding.md`. Never silently make an unapproved generated person identity truth.
 
 ### `approve_seed`
-If accepted, validate obvious anatomy/identity quality, promote the seed to golden with explicit user approval, and continue. If rejected, discard/reject it and generate one replacement based on the user's correction.
+If accepted, validate obvious anatomy quality, run `aice approve-seed <character> <image-path>`, and continue. If rejected, discard it and generate one replacement based on the user's correction.
 
 ### `collect_references`
 Tell the user they can upload as many photos as they want and that different angles/detail shots help. Each time images arrive:
