@@ -140,7 +140,7 @@ def _smoke_test(rt: ComfyRuntime, hw: hwmod.HardwareProfile) -> dict[str, Any]:
             out = Path(td) / "out"
             req = GenerationRequest(
                 character="smoke", prompt="a natural candid photo of a person, soft daylight",
-                reference_paths=(ref,), aspect="portrait", budget="economy", seed=1234,
+                reference_paths=(ref,), aspect="portrait", budget="balanced", seed=1234,
                 out_dir=out,
             )
             t0 = time.monotonic()

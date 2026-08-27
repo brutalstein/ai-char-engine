@@ -7,10 +7,10 @@ from ..providers.base import EffectiveSettings
 from .hardware import HardwareProfile
 
 # --- model variants (keys must match comfy/registry.json "models") -----------
-QWEN_EDIT_2509_FP4_R128_8STEP = "qwen_image_edit_2509_fp4_r128_lightning8"
-QWEN_EDIT_2509_FP4_R32_4STEP = "qwen_image_edit_2509_fp4_r32_lightning4"
-QWEN_EDIT_2509_INT4_R128_8STEP = "qwen_image_edit_2509_int4_r128_lightning8"
-QWEN_EDIT_2509_INT4_R32_4STEP = "qwen_image_edit_2509_int4_r32_lightning4"
+# GGUF quant of Qwen-Image-Edit-2509 (city96 ComfyUI-GGUF) + a fused 8-step
+# Lightning LoRA. Q4_K_S is the default; Q3_K_M is the tight-VRAM fallback.
+QWEN_EDIT_2509_GGUF_Q4KS = "qwen_image_edit_2509_gguf_q4ks"
+QWEN_EDIT_2509_GGUF_Q3KM = "qwen_image_edit_2509_gguf_q3km"
 
 
 @dataclass(frozen=True)
@@ -21,12 +21,11 @@ class ModelSamplerProfile:
     scheduler: str
 
 
-# Lightning-fused Qwen-Image-Edit-2509 runs at CFG 1.0 (no true CFG), euler/simple.
+# The Lightning-8-step LoRA is baked into the workflow, so every quant samples the
+# same way: 8 steps, CFG 1.0 (no true CFG), euler/simple.
 MODEL_SAMPLER: dict[str, ModelSamplerProfile] = {
-    QWEN_EDIT_2509_FP4_R128_8STEP: ModelSamplerProfile(8, 1.0, "euler", "simple"),
-    QWEN_EDIT_2509_FP4_R32_4STEP: ModelSamplerProfile(4, 1.0, "euler", "simple"),
-    QWEN_EDIT_2509_INT4_R128_8STEP: ModelSamplerProfile(8, 1.0, "euler", "simple"),
-    QWEN_EDIT_2509_INT4_R32_4STEP: ModelSamplerProfile(4, 1.0, "euler", "simple"),
+    QWEN_EDIT_2509_GGUF_Q4KS: ModelSamplerProfile(8, 1.0, "euler", "simple"),
+    QWEN_EDIT_2509_GGUF_Q3KM: ModelSamplerProfile(8, 1.0, "euler", "simple"),
 }
 
 # ~1 MP buckets, every side a multiple of 32 (Qwen VAE stride).
@@ -52,11 +51,11 @@ class HardwarePolicyProfile:
 
 
 PROFILES: dict[str, HardwarePolicyProfile] = {
-    # RTX 5070 Laptop, 8 GB: NVFP4 model, aggressive offload, upscale only in quality.
+    # RTX 5070 Laptop, 8 GB: Q4_K_S GGUF, aggressive offload, upscale only in quality.
     "rtx_5070_laptop_8gb": HardwarePolicyProfile(
         name="rtx_5070_laptop_8gb",
-        default_model=QWEN_EDIT_2509_FP4_R128_8STEP,
-        low_vram_model=QWEN_EDIT_2509_FP4_R32_4STEP,
+        default_model=QWEN_EDIT_2509_GGUF_Q4KS,
+        low_vram_model=QWEN_EDIT_2509_GGUF_Q3KM,
         server_args=("--lowvram", "--use-pytorch-cross-attention", "--reserve-vram", "0.7"),
         vram_floor_mb=3200,
         vram_headroom_mb=1400,
@@ -65,8 +64,8 @@ PROFILES: dict[str, HardwarePolicyProfile] = {
     ),
     "blackwell_8gb": HardwarePolicyProfile(
         name="blackwell_8gb",
-        default_model=QWEN_EDIT_2509_FP4_R128_8STEP,
-        low_vram_model=QWEN_EDIT_2509_FP4_R32_4STEP,
+        default_model=QWEN_EDIT_2509_GGUF_Q4KS,
+        low_vram_model=QWEN_EDIT_2509_GGUF_Q3KM,
         server_args=("--lowvram", "--use-pytorch-cross-attention", "--reserve-vram", "0.7"),
         vram_floor_mb=3200,
         vram_headroom_mb=1400,
@@ -75,19 +74,19 @@ PROFILES: dict[str, HardwarePolicyProfile] = {
     ),
     "blackwell_12gb_plus": HardwarePolicyProfile(
         name="blackwell_12gb_plus",
-        default_model=QWEN_EDIT_2509_FP4_R128_8STEP,
-        low_vram_model=QWEN_EDIT_2509_FP4_R32_4STEP,
+        default_model=QWEN_EDIT_2509_GGUF_Q4KS,
+        low_vram_model=QWEN_EDIT_2509_GGUF_Q3KM,
         server_args=("--normalvram", "--use-pytorch-cross-attention"),
         vram_floor_mb=4000,
         vram_headroom_mb=2000,
         max_pixels=1_500_000,
         upscale_budgets=("balanced", "quality"),
     ),
-    # Non-Blackwell NVIDIA: INT4 SVDQuant path (no NVFP4).
+    # Any other NVIDIA card: same GGUF path (pure-torch dequant, no Blackwell kernels needed).
     "nvidia_generic": HardwarePolicyProfile(
         name="nvidia_generic",
-        default_model=QWEN_EDIT_2509_INT4_R128_8STEP,
-        low_vram_model=QWEN_EDIT_2509_INT4_R32_4STEP,
+        default_model=QWEN_EDIT_2509_GGUF_Q4KS,
+        low_vram_model=QWEN_EDIT_2509_GGUF_Q3KM,
         server_args=("--lowvram", "--use-pytorch-cross-attention"),
         vram_floor_mb=3600,
         vram_headroom_mb=1600,
@@ -96,8 +95,8 @@ PROFILES: dict[str, HardwarePolicyProfile] = {
     ),
     "cpu_or_unknown": HardwarePolicyProfile(
         name="cpu_or_unknown",
-        default_model=QWEN_EDIT_2509_INT4_R32_4STEP,
-        low_vram_model=QWEN_EDIT_2509_INT4_R32_4STEP,
+        default_model=QWEN_EDIT_2509_GGUF_Q3KM,
+        low_vram_model=QWEN_EDIT_2509_GGUF_Q3KM,
         server_args=(),
         vram_floor_mb=999_999,
         vram_headroom_mb=0,

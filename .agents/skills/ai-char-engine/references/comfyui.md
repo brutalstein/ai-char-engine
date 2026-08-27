@@ -13,10 +13,11 @@ selection, provenance, budgets and repair rules are unchanged — ComfyUI only
 turns an already-compiled request into pixels.
 
 Stack (chosen for an 8 GB Blackwell laptop; all Apache-2.0):
-- Qwen-Image-Edit-2509, Nunchaku NVFP4 SVDQuant, Lightning 8-step
+- Qwen-Image-Edit-2509, GGUF quant (Q4_K_S default, Q3_K_M tight-VRAM), fused
+  8-step Lightning LoRA
 - identity = the model's native `TextEncodeQwenImageEditPlus` multi-image input
   (1–3 references), no IP-Adapter / InstantID / PuLID
-- one custom node: `ComfyUI-nunchaku`
+- one custom node: `ComfyUI-GGUF` (city96)
 - runtime + venv + models live in `~/.aice/runtime` (never committed, 127.0.0.1 only)
 
 ## Setup (Codex runs this; never ask the user to type it)

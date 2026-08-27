@@ -1,14 +1,15 @@
 {
   "name": "qwen_edit_identity",
-  "version": "1.0.0",
-  "description": "Qwen-Image-Edit-2509 (Nunchaku) identity-into-scene. Empty-latent path: scene from the prompt, identity from 1-3 reference images via TextEncodeQwenImageEditPlus.",
+  "version": "1.1.0",
+  "description": "Qwen-Image-Edit-2509 GGUF (city96 UnetLoaderGGUF) + fused 8-step Lightning LoRA. Empty-latent path: scene from the prompt, identity from 1-3 reference images via TextEncodeQwenImageEditPlus.",
   "required_class_types": [
-    "NunchakuQwenImageDiTLoader", "CLIPLoader", "VAELoader", "ModelSamplingAuraFlow",
-    "CFGNorm", "TextEncodeQwenImageEditPlus", "EmptySD3LatentImage", "KSampler",
-    "VAEDecode", "SaveImage", "LoadImage", "ImageScaleToTotalPixels"
+    "UnetLoaderGGUF", "LoraLoaderModelOnly", "CLIPLoader", "VAELoader",
+    "ModelSamplingAuraFlow", "CFGNorm", "TextEncodeQwenImageEditPlus",
+    "EmptySD3LatentImage", "KSampler", "VAEDecode", "SaveImage",
+    "LoadImage", "ImageScaleToTotalPixels"
   ],
   "slots": {
-    "model_path":     {"node": "115", "input": "model_path"},
+    "model_path":     {"node": "115", "input": "unet_name"},
     "positive_prompt":{"node": "111", "input": "prompt"},
     "negative_prompt":{"node": "110", "input": "prompt"},
     "width":          {"node": "112", "input": "width"},
@@ -25,10 +26,5 @@
     {"load": "106", "scale": "107", "enc_input": "image2"},
     {"load": "108", "scale": "109", "enc_input": "image3"}
   ],
-  "text_encoder_nodes": ["110", "111"],
-  "loader_overridable": {
-    "note": "NunchakuQwenImageDiTLoader input names are reconciled against live /object_info during `aice comfy setup`; the smoke step rewrites this asset with the exact keys if they differ.",
-    "cpu_offload_input": "cpu_offload",
-    "blocks_on_gpu_input": "num_blocks_on_gpu"
-  }
+  "text_encoder_nodes": ["110", "111"]
 }

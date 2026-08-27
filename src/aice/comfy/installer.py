@@ -82,6 +82,7 @@ def extra_model_paths_yaml(models_dir: Path) -> str:
         f"  base_path: {m}\n"
         "  checkpoints: checkpoints\n"
         "  diffusion_models: diffusion_models\n"
+        "  unet: unet\n"
         "  text_encoders: text_encoders\n"
         "  clip: text_encoders\n"
         "  vae: vae\n"
@@ -179,23 +180,9 @@ class ComfyInstaller:
             out.append({"name": node["name"], "sha": _git_sha(target)})
         return out
 
-    def ensure_nunchaku_backend(self, log: Progress | None = None) -> str:
-        try:
-            return _run([str(self.venv_python), "-c",
-                         "import nunchaku;print(nunchaku.__version__)"]).strip()
-        except InstallError:
-            pass
-        try:
-            self._pip("install", "nunchaku", log=log)
-        except InstallError:
-            self._pip("install", "nunchaku", "--extra-index-url",
-                      "https://nunchaku.tech/whl/", log=log)
-        return _run([str(self.venv_python), "-c",
-                     "import nunchaku;print(nunchaku.__version__)"]).strip()
-
     def ensure_extra_model_paths(self) -> None:
         self.models_dir.mkdir(parents=True, exist_ok=True)
-        for sub in ("diffusion_models", "text_encoders", "vae", "loras",
+        for sub in ("diffusion_models", "unet", "text_encoders", "vae", "loras",
                     "upscale_models", "checkpoints"):
             (self.models_dir / sub).mkdir(exist_ok=True)
         (self.runtime_dir / "extra_model_paths.yaml").write_text(
@@ -226,10 +213,6 @@ class ComfyInstaller:
         torch = self.ensure_torch(log)
         self.ensure_comfy_requirements(log)
         nodes = self.ensure_custom_nodes(log)
-        try:
-            nunchaku_ver = self.ensure_nunchaku_backend(log)
-        except InstallError as exc:
-            nunchaku_ver = f"ERROR: {exc}"
         self.ensure_extra_model_paths()
         fetched = self.ensure_models(model_keys, progress=model_progress)
 
@@ -238,7 +221,6 @@ class ComfyInstaller:
             "custom_nodes": nodes,
             "torch": torch.get("v", ""),
             "torch_cuda": torch.get("cuda", ""),
-            "nunchaku": nunchaku_ver,
         }
         self.cfg["profile"] = policymod.classify(hw.load_cached() or hw.detect())
         cfgmod.save_config(self.cfg)
@@ -247,7 +229,6 @@ class ComfyInstaller:
             "comfyui_sha": comfy_sha,
             "torch": torch,
             "custom_nodes": nodes,
-            "nunchaku": nunchaku_ver,
             "models_fetched": fetched,
             "profile": self.cfg["profile"],
         }

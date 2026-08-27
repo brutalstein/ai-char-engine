@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "note": "Model stack for the Qwen-Image-Edit-2509 identity workflow. Files download to <models_dir>/<dest_subdir>/<filename>. Sizes/hashes pin the exact revision; installer verifies before use. Nothing here is committed as a binary.",
+  "note": "Model stack for the Qwen-Image-Edit-2509 GGUF identity workflow. Files download to <models_dir>/<dest_subdir>/<filename>. Sizes/hashes pin the exact revision; installer verifies before use. Nothing here is committed as a binary.",
   "comfyui": {
     "repo": "https://github.com/comfyanonymous/ComfyUI.git",
     "pin": "master",
@@ -8,58 +8,48 @@
   },
   "custom_nodes": [
     {
-      "name": "ComfyUI-nunchaku",
-      "repo": "https://github.com/nunchaku-tech/ComfyUI-nunchaku.git",
+      "name": "ComfyUI-GGUF",
+      "repo": "https://github.com/city96/ComfyUI-GGUF.git",
       "pin": "main",
-      "required_class_types": ["NunchakuQwenImageDiTLoader"],
+      "required_class_types": ["UnetLoaderGGUF"],
       "license": "Apache-2.0"
     }
   ],
   "torch": {
     "index_url": "https://download.pytorch.org/whl/cu130",
     "packages": ["torch", "torchvision", "torchaudio"],
-    "reason": "cu130 is required for ComfyUI NVFP4 acceleration on Blackwell"
+    "reason": "cu130 ships the Blackwell (sm_120) CUDA kernels the RTX 50-series needs"
   },
   "models": {
-    "qwen_image_edit_2509_fp4_r128_lightning8": {
-      "filename": "svdq-fp4_r128-qwen-image-edit-2509-lightningv2.0-8steps.safetensors",
-      "dest_subdir": "diffusion_models",
-      "url": "https://huggingface.co/nunchaku-tech/nunchaku-qwen-image-edit-2509/resolve/main/svdq-fp4_r128-qwen-image-edit-2509-lightningv2.0-8steps.safetensors",
-      "size_bytes": 13081386856,
-      "sha256": "bc326ac54b247aea704c6cc47492cf68e5c85c937d50e5afcc9638fbdeeabcb3",
+    "qwen_image_edit_2509_gguf_q4ks": {
+      "filename": "Qwen-Image-Edit-2509-Q4_K_S.gguf",
+      "dest_subdir": "unet",
+      "url": "https://huggingface.co/QuantStack/Qwen-Image-Edit-2509-GGUF/resolve/main/Qwen-Image-Edit-2509-Q4_K_S.gguf",
+      "size_bytes": 12204309024,
+      "sha256": "07e64364812e527e0e39db3770440f76a5ed4732926c54a0a0e7da841cbe0ce6",
       "license": "Apache-2.0",
-      "vram_class": "8gb-nvfp4-offload",
+      "vram_class": "8gb-gguf-offload",
       "required": true
     },
-    "qwen_image_edit_2509_fp4_r32_lightning4": {
-      "filename": "svdq-fp4_r32-qwen-image-edit-2509-lightningv2.0-4steps.safetensors",
-      "dest_subdir": "diffusion_models",
-      "url": "https://huggingface.co/nunchaku-tech/nunchaku-qwen-image-edit-2509/resolve/main/svdq-fp4_r32-qwen-image-edit-2509-lightningv2.0-4steps.safetensors",
-      "size_bytes": 11948923656,
-      "sha256": "bd58dea58814f546e3ba5e13af072d353bb2276525564bf49337c5cd506cf9be",
+    "qwen_image_edit_2509_gguf_q3km": {
+      "filename": "Qwen-Image-Edit-2509-Q3_K_M.gguf",
+      "dest_subdir": "unet",
+      "url": "https://huggingface.co/QuantStack/Qwen-Image-Edit-2509-GGUF/resolve/main/Qwen-Image-Edit-2509-Q3_K_M.gguf",
+      "size_bytes": 9764502048,
+      "sha256": "8fc24bbc4f818dd767f5219f38b8011bf1f2d196b9d1c3cab8df51f8e9f3bd43",
       "license": "Apache-2.0",
-      "vram_class": "8gb-nvfp4-lowrank",
+      "vram_class": "8gb-gguf-tight",
       "required": false
     },
-    "qwen_image_edit_2509_int4_r128_lightning8": {
-      "filename": "svdq-int4_r128-qwen-image-edit-2509-lightningv2.0-8steps.safetensors",
-      "dest_subdir": "diffusion_models",
-      "url": "https://huggingface.co/nunchaku-tech/nunchaku-qwen-image-edit-2509/resolve/main/svdq-int4_r128-qwen-image-edit-2509-lightningv2.0-8steps.safetensors",
-      "size_bytes": 12654443144,
-      "sha256": null,
+    "qwen_image_edit_2509_lightning_8step": {
+      "filename": "Qwen-Image-Edit-2509-Lightning-8steps-V1.0-bf16.safetensors",
+      "dest_subdir": "loras",
+      "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Edit-2509/Qwen-Image-Edit-2509-Lightning-8steps-V1.0-bf16.safetensors",
+      "size_bytes": 849608296,
+      "sha256": "b5c48ba90d22294cc4e20ea4a347496e2136295ad438ff79ad4fe841f28d7f72",
       "license": "Apache-2.0",
-      "vram_class": "non-blackwell-int4",
-      "required": false
-    },
-    "qwen_image_edit_2509_int4_r32_lightning4": {
-      "filename": "svdq-int4_r32-qwen-image-edit-2509-lightningv2.0-4steps.safetensors",
-      "dest_subdir": "diffusion_models",
-      "url": "https://huggingface.co/nunchaku-tech/nunchaku-qwen-image-edit-2509/resolve/main/svdq-int4_r32-qwen-image-edit-2509-lightningv2.0-4steps.safetensors",
-      "size_bytes": 11521979944,
-      "sha256": null,
-      "license": "Apache-2.0",
-      "vram_class": "non-blackwell-int4-lowrank",
-      "required": false
+      "vram_class": "small",
+      "required": true
     },
     "qwen_2.5_vl_7b_fp8_scaled": {
       "filename": "qwen_2.5_vl_7b_fp8_scaled.safetensors",

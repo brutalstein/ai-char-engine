@@ -72,7 +72,7 @@ class _Server(ThreadingHTTPServer):
         self.uploaded: list[str] = []
         self.reject_prompt = False
         self.freed = False
-        self.nodes = ["NunchakuQwenImageDiTLoader", "CLIPLoader", "KSampler"]
+        self.nodes = ["UnetLoaderGGUF", "CLIPLoader", "KSampler"]
 
 
 class ClientTests(unittest.TestCase):

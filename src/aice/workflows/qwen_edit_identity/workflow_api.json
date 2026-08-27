@@ -15,16 +15,19 @@
   },
   "39": {"class_type": "VAELoader", "inputs": {"vae_name": "qwen_image_vae.safetensors"}},
   "60": {"class_type": "SaveImage", "inputs": {"filename_prefix": "AICE", "images": ["8", 0]}},
-  "66": {"class_type": "ModelSamplingAuraFlow", "inputs": {"shift": 3.0, "model": ["115", 0]}},
+  "66": {"class_type": "ModelSamplingAuraFlow", "inputs": {"shift": 3.0, "model": ["116", 0]}},
   "75": {"class_type": "CFGNorm", "inputs": {"strength": 1.0, "model": ["66", 0]}},
   "112": {"class_type": "EmptySD3LatentImage", "inputs": {"width": 1024, "height": 1024, "batch_size": 1}},
   "115": {
-    "class_type": "NunchakuQwenImageDiTLoader",
+    "class_type": "UnetLoaderGGUF",
+    "inputs": {"unet_name": "Qwen-Image-Edit-2509-Q4_K_S.gguf"}
+  },
+  "116": {
+    "class_type": "LoraLoaderModelOnly",
     "inputs": {
-      "model_path": "svdq-fp4_r128-qwen-image-edit-2509-lightningv2.0-8steps.safetensors",
-      "cpu_offload": "enable",
-      "num_blocks_on_gpu": 1,
-      "use_pin_memory": "disable"
+      "lora_name": "Qwen-Image-Edit-2509-Lightning-8steps-V1.0-bf16.safetensors",
+      "strength_model": 1.0,
+      "model": ["115", 0]
     }
   },
   "78": {"class_type": "LoadImage", "inputs": {"image": "aice_ref_1.png"}},

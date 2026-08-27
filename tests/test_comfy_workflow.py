@@ -8,16 +8,18 @@ from aice.comfy.models import load_registry, missing_required, model_specs, veri
 from aice.comfy.workflow import WorkflowAdapter, WorkflowError
 
 _ALL_NODES = {
-    "NunchakuQwenImageDiTLoader", "CLIPLoader", "VAELoader", "ModelSamplingAuraFlow",
-    "CFGNorm", "TextEncodeQwenImageEditPlus", "EmptySD3LatentImage", "KSampler",
-    "VAEDecode", "SaveImage", "LoadImage", "ImageScaleToTotalPixels",
+    "UnetLoaderGGUF", "LoraLoaderModelOnly", "CLIPLoader", "VAELoader",
+    "ModelSamplingAuraFlow", "CFGNorm", "TextEncodeQwenImageEditPlus",
+    "EmptySD3LatentImage", "KSampler", "VAEDecode", "SaveImage",
+    "LoadImage", "ImageScaleToTotalPixels",
 }
 
 
 class RegistryTests(unittest.TestCase):
     def test_registry_has_required_models(self) -> None:
         req = [k for k, s in model_specs().items() if s.required]
-        self.assertIn("qwen_image_edit_2509_fp4_r128_lightning8", req)
+        self.assertIn("qwen_image_edit_2509_gguf_q4ks", req)
+        self.assertIn("qwen_image_edit_2509_lightning_8step", req)
         self.assertIn("qwen_2.5_vl_7b_fp8_scaled", req)
         self.assertIn("qwen_image_vae", req)
 
@@ -64,15 +66,15 @@ class WorkflowAdapterTests(unittest.TestCase):
 
     def test_validate_fails_with_missing_node(self) -> None:
         with self.assertRaises(WorkflowError) as ctx:
-            self.wf.validate(_ALL_NODES - {"NunchakuQwenImageDiTLoader"})
-        self.assertIn("NunchakuQwenImageDiTLoader", str(ctx.exception))
+            self.wf.validate(_ALL_NODES - {"UnetLoaderGGUF"})
+        self.assertIn("UnetLoaderGGUF", str(ctx.exception))
 
     def test_render_patches_only_semantic_slots(self) -> None:
         g = self._render(["r1.png"])
         self.assertEqual(g["3"]["inputs"]["seed"], 42)
         self.assertEqual(g["3"]["inputs"]["steps"], 8)
         self.assertEqual(g["112"]["inputs"]["width"], 896)
-        self.assertEqual(g["115"]["inputs"]["model_path"], "model.safetensors")
+        self.assertEqual(g["115"]["inputs"]["unet_name"], "model.safetensors")
         self.assertEqual(g["111"]["inputs"]["prompt"], "candid photo in Milan")
         self.assertEqual(g["60"]["inputs"]["filename_prefix"], "AICE")
 
