@@ -230,16 +230,20 @@ def register_reference(
     tags: list[str] | None = None,
     parent_ids: list[str] | None = None,
     notes: str = "",
+    user_approved: bool = False,
 ) -> dict[str, Any]:
     source_path = source_path.expanduser().resolve()
     if not source_path.is_file():
         raise FileNotFoundError(str(source_path))
-    if source not in {"user_uploaded", "generated"}:
-        raise ValueError("source must be user_uploaded or generated")
+    if source not in {"user_uploaded", "generated", "generated_approved"}:
+        raise ValueError("source must be user_uploaded, generated, or generated_approved")
     if tier not in REFERENCE_TIERS:
         raise ValueError("invalid reference tier")
     if source == "generated" and tier != "candidate":
         raise ValueError("Generated references must enter as candidate and pass the quality gate")
+    if source == "generated_approved":
+        if tier != "golden" or not user_approved or slugify(role) != "seed":
+            raise ValueError("generated_approved is reserved for an explicitly approved initial seed")
     parent_ids = parent_ids or []
     manifest = load_manifest(char_dir)
     if source == "generated":
