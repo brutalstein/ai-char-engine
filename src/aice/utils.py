@@ -5,9 +5,10 @@ import json
 import os
 import re
 import tempfile
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 
 def utc_now() -> str:
@@ -59,21 +60,21 @@ def append_jsonl(path: Path, payload: dict[str, Any]) -> None:
         handle.write(line + "\n")
 
 
-def read_jsonl(path: Path) -> list[dict[str, Any]]:
-    if not path.exists():
+def tail_jsonl(path: Path, limit: int) -> list[dict[str, Any]]:
+    if limit <= 0 or not path.exists():
         return []
-    rows: list[dict[str, Any]] = []
+    rows: deque[dict[str, Any]] = deque(maxlen=limit)
     with path.open("r", encoding="utf-8") as handle:
         for line in handle:
             line = line.strip()
             if line:
                 rows.append(json.loads(line))
-    return rows
+    return list(rows)
 
 
 def parse_json_arg(value: str) -> Any:
     stripped = value.lstrip()
-    if stripped.startswith("{") or stripped.startswith("["):
+    if stripped.startswith("{") or stripped.startswith("[") or stripped.startswith('"'):
         return json.loads(value)
     candidate = Path(value)
     try:
@@ -86,3 +87,30 @@ def parse_json_arg(value: str) -> Any:
 
 def compact_json(payload: Any) -> str:
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+
+def canonical_value(value: Any) -> str:
+    return compact_json(value)
+
+
+def deep_set(target: dict[str, Any], dotted: str, value: Any) -> None:
+    if not dotted or any(part in {"", ".", ".."} for part in dotted.split(".")):
+        raise ValueError(f"Invalid fact path: {dotted!r}")
+    node = target
+    parts = dotted.split(".")
+    for part in parts[:-1]:
+        child = node.get(part)
+        if not isinstance(child, dict):
+            child = {}
+            node[part] = child
+        node = child
+    node[parts[-1]] = value
+
+
+def flatten_dict(value: dict[str, Any], prefix: str = "") -> Iterable[tuple[str, Any]]:
+    for key, item in value.items():
+        path = f"{prefix}.{key}" if prefix else key
+        if isinstance(item, dict) and item:
+            yield from flatten_dict(item, path)
+        else:
+            yield path, item

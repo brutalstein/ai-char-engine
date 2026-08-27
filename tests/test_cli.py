@@ -10,52 +10,57 @@ from pathlib import Path
 
 
 class CliTests(unittest.TestCase):
-    def run_cli(self, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+    def run_cli(self, *args: str) -> subprocess.CompletedProcess[str]:
         env = os.environ.copy()
         src = str(Path(__file__).resolve().parents[1] / "src")
         env["PYTHONPATH"] = src + os.pathsep + env.get("PYTHONPATH", "")
-        return subprocess.run(
-            [sys.executable, "-m", "aice.cli", *args],
-            cwd=str(cwd) if cwd else None,
-            env=env,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
+        return subprocess.run([sys.executable, "-m", "aice.cli", *args], env=env, text=True, capture_output=True, check=False)
 
-    def test_end_to_end_deterministic_cli(self) -> None:
+    def test_interactive_begin_and_guide(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td) / ".aice"
+            result = self.run_cli("--home", str(home), "begin", "Maya", "--origin", "references")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["guide"]["stage"], "collect_references")
+            result = self.run_cli("--home", str(home), "guide", "maya")
+            self.assertEqual(json.loads(result.stdout)["stage"], "collect_references")
+
+    def test_approved_generated_seed_has_dedicated_path(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            home = root / ".aice"
+            seed = root / "generated.png"
+            seed.write_bytes(b"generated-seed")
+            self.assertEqual(self.run_cli("--home", str(home), "begin", "Nova", "--origin", "scratch").returncode, 0)
+            result = self.run_cli("--home", str(home), "approve-seed", "nova", str(seed))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["reference"]["source"], "generated_approved")
+            self.assertEqual(payload["reference"]["tier"], "golden")
+
+    def test_doctor_needs_no_api_key(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            result = self.run_cli("--home", str(Path(td) / ".aice"), "doctor")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertFalse(payload["openai_api_key_required"])
+            self.assertTrue(payload["interactive_guide"])
+
+    def test_observe_and_brain_cli(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             home = root / ".aice"
             seed = root / "seed.png"
             seed.write_bytes(b"seed")
-            result = self.run_cli("--home", str(home), "init", "Maya")
+            self.assertEqual(self.run_cli("--home", str(home), "begin", "Maya", "--origin", "references").returncode, 0)
+            seed_out = self.run_cli("--home", str(home), "seed", "maya", str(seed), "--tags", "face,front")
+            ref_id = json.loads(seed_out.stdout)["reference"]["id"]
+            obs = json.dumps({"path": "identity.hair.color", "value": "black", "source_kind": "visual", "source_ref": ref_id})
+            result = self.run_cli("--home", str(home), "observe", "maya", "--json", obs)
             self.assertEqual(result.returncode, 0, result.stderr)
-            result = self.run_cli("--home", str(home), "seed", "maya", str(seed), "--tags", "face,front,upper_body")
-            self.assertEqual(result.returncode, 0, result.stderr)
-            result = self.run_cli("--home", str(home), "context", "maya", "candid cafe portrait", "--compact")
-            self.assertEqual(result.returncode, 0, result.stderr)
-            payload = json.loads(result.stdout)
-            self.assertEqual(payload["character"], "maya")
-            self.assertGreaterEqual(len(payload["references"]), 1)
-            result = self.run_cli("--home", str(home), "doctor")
-            self.assertEqual(result.returncode, 0, result.stderr)
-            doctor = json.loads(result.stdout)
-            self.assertFalse(doctor["openai_api_key_required"])
-
-    def test_generated_ref_cannot_enter_golden_directly(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            home = root / ".aice"
-            image = root / "x.png"
-            image.write_bytes(b"x")
-            self.assertEqual(self.run_cli("--home", str(home), "init", "Maya").returncode, 0)
-            result = self.run_cli(
-                "--home", str(home), "add-ref", "maya", str(image),
-                "--role", "face_front", "--source", "generated", "--tier", "golden",
-            )
-            self.assertEqual(result.returncode, 2)
-            self.assertIn("Generated references", result.stderr)
+            result = self.run_cli("--home", str(home), "brain", "maya")
+            self.assertEqual(json.loads(result.stdout)["resolved"]["identity"]["hair"]["color"], "black")
 
 
 if __name__ == "__main__":
