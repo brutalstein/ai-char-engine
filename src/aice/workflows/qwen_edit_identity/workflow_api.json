@@ -31,11 +31,11 @@
     }
   },
   "78": {"class_type": "LoadImage", "inputs": {"image": "aice_ref_1.png"}},
-  "79": {"class_type": "ImageScaleToTotalPixels", "inputs": {"upscale_method": "lanczos", "megapixels": 1.0, "image": ["78", 0]}},
+  "79": {"class_type": "ImageScaleToTotalPixels", "inputs": {"upscale_method": "lanczos", "megapixels": 1.0, "resolution_steps": 1, "image": ["78", 0]}},
   "106": {"class_type": "LoadImage", "inputs": {"image": "aice_ref_2.png"}},
-  "107": {"class_type": "ImageScaleToTotalPixels", "inputs": {"upscale_method": "lanczos", "megapixels": 1.0, "image": ["106", 0]}},
+  "107": {"class_type": "ImageScaleToTotalPixels", "inputs": {"upscale_method": "lanczos", "megapixels": 1.0, "resolution_steps": 1, "image": ["106", 0]}},
   "108": {"class_type": "LoadImage", "inputs": {"image": "aice_ref_3.png"}},
-  "109": {"class_type": "ImageScaleToTotalPixels", "inputs": {"upscale_method": "lanczos", "megapixels": 1.0, "image": ["108", 0]}},
+  "109": {"class_type": "ImageScaleToTotalPixels", "inputs": {"upscale_method": "lanczos", "megapixels": 1.0, "resolution_steps": 1, "image": ["108", 0]}},
   "110": {
     "class_type": "TextEncodeQwenImageEditPlus",
     "inputs": {"prompt": "", "clip": ["38", 0], "vae": ["39", 0],

@@ -71,6 +71,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertFalse(_pid_alive(999999999))
 
     def test_start_is_idempotent_when_already_healthy(self) -> None:
+        self.rt.is_installed = lambda: True  # type: ignore[assignment]
         self.rt.health = lambda timeout=3.0: True  # type: ignore[assignment]
         self.rt.start(wait=False)
         self.assertIsNone(self.rt._proc)  # never spawned a process

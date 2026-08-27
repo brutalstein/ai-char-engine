@@ -113,12 +113,12 @@ class ComfyRuntime:
     # -- lifecycle ----------------------------------------------------
     def start(self, policy_args: tuple[str, ...] = (), *, wait: bool = True,
               timeout: float = 240.0) -> dict[str, Any]:
-        if self.health(timeout=2.0):
-            return self.status()  # idempotent: already up
         if not self.is_installed():
             raise ComfyError(
                 f"ComfyUI runtime is not installed at {self.runtime_dir} (run `aice comfy setup`)"
             )
+        if self.health(timeout=2.0):
+            return self.status()  # idempotent: already up
         if self._read_pid() is not None:
             if wait:
                 self._wait_ready(timeout)
