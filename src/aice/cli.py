@@ -283,17 +283,62 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     probe.write_text("ok", encoding="utf-8")
     probe.unlink()
     py_ok = sys.version_info >= (3, 11)
-    emit({
-        "ok": py_ok,
+    report = {
+        "ok": py_ok,  # core plugin health only; the local backend is optional
         "version": __version__,
         "python": sys.version.split()[0],
         "python_supported": py_ok,
         "home": str(home),
         "home_writable": True,
         "openai_api_key_required": False,
-        "image_backend": "Codex built-in image_gen",
+        "image_backend": "Codex built-in image_gen (fallback); local ComfyUI when installed",
         "interactive_guide": True,
-    })
+    }
+    try:  # never let an optional backend fail core doctor
+        from .comfy.cli_ops import backend_health
+
+        report["local_image_backend"] = backend_health()
+    except Exception as exc:  # noqa: BLE001
+        report["local_image_backend"] = {"state": "unavailable", "detail": str(exc)}
+    emit(report)
+
+
+def cmd_comfy(args: argparse.Namespace) -> None:
+    from .comfy import cli_ops
+
+    action = args.comfy_action
+    if action == "status":
+        emit(cli_ops.status())
+    elif action == "doctor":
+        emit(cli_ops.doctor(smoke=args.smoke))
+    elif action == "setup":
+        keys = [k.strip() for k in args.models.split(",") if k.strip()] if args.models else None
+        emit(cli_ops.setup(model_keys=keys))
+    elif action == "start":
+        emit(cli_ops.start())
+    elif action == "stop":
+        emit(cli_ops.stop())
+    elif action == "generate":
+        from .providers.orchestrator import plan_and_generate, result_ledger_row
+
+        out = plan_and_generate(
+            engine_home(args.home), args.character, args.prompt,
+            budget=args.budget, backend=args.backend,
+            seed=args.seed, out_dir=Path(args.out) if args.out else None,
+        )
+        result = out["result"]
+        emit({
+            "ok": result.status != "failed",
+            "backend_selected": out["backend_selected"],
+            "backend_effective": out["backend_effective"],
+            "status": result.status,
+            "output_path": str(result.output_path) if result.output_path else None,
+            "result": result.to_json(),
+            "ledger": result_ledger_row(result),
+            "context": out["context"] if args.with_context else None,
+        })
+    else:  # pragma: no cover - argparse enforces choices
+        raise ValueError(f"unknown comfy action: {action}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -326,6 +371,22 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("record"); p.add_argument("character"); p.add_argument("image"); p.add_argument("--prompt", required=True); p.add_argument("--fingerprint", default="{}"); p.add_argument("--validation", default="{}"); p.add_argument("--status", choices=["draft", "approved", "rejected"], default="draft"); p.add_argument("--budget", choices=["economy", "balanced", "quality"], default="balanced"); p.set_defaults(func=cmd_record)
     p = sub.add_parser("stats"); p.add_argument("character"); p.set_defaults(func=cmd_stats)
     p = sub.add_parser("doctor"); p.set_defaults(func=cmd_doctor)
+
+    c = sub.add_parser("comfy", help="local ComfyUI image backend (Codex-invoked)")
+    csub = c.add_subparsers(dest="comfy_action", required=True)
+    csub.add_parser("status").set_defaults(func=cmd_comfy)
+    cd = csub.add_parser("doctor"); cd.add_argument("--smoke", action="store_true"); cd.set_defaults(func=cmd_comfy)
+    cs = csub.add_parser("setup"); cs.add_argument("--models", default=""); cs.set_defaults(func=cmd_comfy)
+    csub.add_parser("start").set_defaults(func=cmd_comfy)
+    csub.add_parser("stop").set_defaults(func=cmd_comfy)
+    cg = csub.add_parser("generate")
+    cg.add_argument("character"); cg.add_argument("prompt")
+    cg.add_argument("--budget", choices=["economy", "balanced", "quality"], default="balanced")
+    cg.add_argument("--backend", choices=["auto", "comfyui", "codex_builtin"], default="auto")
+    cg.add_argument("--seed", type=int, default=None)
+    cg.add_argument("--out", default="")
+    cg.add_argument("--with-context", action="store_true")
+    cg.set_defaults(func=cmd_comfy)
     return parser
 
 
