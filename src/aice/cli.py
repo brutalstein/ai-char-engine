@@ -84,6 +84,23 @@ def cmd_seed(args: argparse.Namespace) -> None:
     emit({"ok": True, "reference": record})
 
 
+def cmd_approve_seed(args: argparse.Namespace) -> None:
+    home = engine_home(args.home)
+    char_dir, _ = load_profile(home, args.character)
+    tags = [x.strip() for x in args.tags.split(",") if x.strip()] or ["face", "front"]
+    record = register_reference(
+        char_dir,
+        _image(args.image),
+        role="seed",
+        source="generated_approved",
+        tier="golden",
+        tags=tags,
+        notes="Initial generated seed explicitly approved by the user.",
+        user_approved=True,
+    )
+    emit({"ok": True, "reference": record, "guide": guide(home, args.character)})
+
+
 def cmd_add_ref(args: argparse.Namespace) -> None:
     home = engine_home(args.home)
     char_dir, _ = load_profile(home, args.character)
@@ -290,6 +307,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("characters"); p.set_defaults(func=cmd_characters)
     p = sub.add_parser("guide"); p.add_argument("character", nargs="?"); p.set_defaults(func=cmd_guide)
     p = sub.add_parser("seed"); p.add_argument("character"); p.add_argument("image"); p.add_argument("--tags", default="face,front"); p.set_defaults(func=cmd_seed)
+    p = sub.add_parser("approve-seed"); p.add_argument("character"); p.add_argument("image"); p.add_argument("--tags", default="face,front,upper_body"); p.set_defaults(func=cmd_approve_seed)
     p = sub.add_parser("add-ref"); p.add_argument("character"); p.add_argument("image"); p.add_argument("--role", required=True); p.add_argument("--source", choices=["user_uploaded", "generated"], default="user_uploaded"); p.add_argument("--tier", choices=["golden", "trusted", "candidate", "rejected"], default="golden"); p.add_argument("--tags", default=""); p.add_argument("--parents", default=""); p.add_argument("--notes", default=""); p.set_defaults(func=cmd_add_ref)
     p = sub.add_parser("refs-done"); p.add_argument("character"); p.set_defaults(func=cmd_refs_done)
     p = sub.add_parser("mark-ready"); p.add_argument("character"); p.set_defaults(func=cmd_mark_ready)
