@@ -1,217 +1,217 @@
 # AI Character Engine
 
-A personal, Codex-native **persistent visual character engine**. It turns one or more approved reference images into a compact character state and a trusted multi-angle reference bank, then uses Codex's built-in image generation to create new photos of the same synthetic adult character with as little repeated context and as few image calls as practical.
+A Codex-native plugin for building one persistent synthetic adult character and generating new photorealistic images of that same character with minimal user effort.
 
-The project is deliberately **not** an Image API wrapper. The default workflow uses Codex's built-in `image_gen` capability, so it does not require an `OPENAI_API_KEY`. The local Python layer only manages deterministic state, reference selection, history fingerprints, budgets, and quality gates.
+The user experience is intentionally conversational: **you do not need to learn commands, schemas, prompt engineering, or reference-management rules.** Codex guides onboarding, runs the local state engine itself, uses built-in image generation, and asks only the next useful question.
 
-## Why this architecture
+## What it does
 
-The hard problem is not "generate a pretty image." It is long-term **identity continuity**:
+- create a character from scratch, or start from your existing reference photos
+- accept any number of reference images
+- build an evidence-grounded character brain with source provenance
+- surface conflicting permanent details instead of guessing
+- let user-confirmed facts override ambiguous visual evidence
+- maintain trusted/golden/candidate reference lineage to reduce identity drift
+- expand missing angles lazily instead of generating a huge reference pack up front
+- select only the references needed for each scene
+- keep permanent details visibility-aware
+- remember recent pose/gaze/framing patterns using tiny fingerprints instead of resending history images
+- use bounded generation/repair budgets to keep model usage predictable
+- cache repeated reference analysis by SHA-256
 
-- same recognizable face
-- stable skin/hair/body traits
-- permanent details only when grounded and visible
-- multi-angle reference coverage without recursive drift
-- less repetition in gaze, pose, framing, environment, and lighting
-- bounded token/context usage
-- bounded image retries
+## Easiest install
 
-The engine separates four concerns:
+In Codex, paste this repository and say:
 
-```text
-User prompt
-   |
-   v
-Compact character state + content memory   (local, deterministic)
-   |
-   v
-Reference selector + context compiler       (local, deterministic)
-   |
-   v
-Codex reasoning + built-in image_gen        (semantic + visual)
-   |
-   v
-Adaptive validation -> max one repair       (Codex)
-   |
-   v
-Final image + tiny content fingerprint      (local state)
-```
+> Install this plugin and set it up for me.
 
-## Current OpenAI assumptions
+Codex is instructed by `AGENTS.md` to install the personal plugin, run diagnostics and tests, and avoid asking you to type commands unless something actually fails.
 
-This repository targets the current Codex plugin/skill model and the built-in system image-generation workflow. OpenAI's current system `imagegen` skill prefers the built-in `image_gen` tool for normal generation/editing and explicitly does **not** require `OPENAI_API_KEY`; its separate CLI/API fallback is opt-in only. GPT-Image-2 is OpenAI's current state-of-the-art image generation/editing model and supports high-fidelity image inputs.
+Repository:
 
-Because built-in image generation is a Codex capability, unit tests validate the deterministic engine locally; the final live image-generation smoke test must be run inside Codex.
+`https://github.com/brutalstein/ai-char-engine`
 
-## Install locally
+After installation, restart Codex if it asks you to refresh plugin discovery.
 
-Requires Python 3.11+.
+## What onboarding feels like
 
-```powershell
-git clone https://github.com/brutalstein/ai-char-engine.git
-cd ai-char-engine
-python -m pip install -e .
-aice doctor
-```
+### New character
 
-No API key is required for the default Codex workflow.
+You can say:
 
-## Quick start
+> I want to create a new character from scratch.
 
-### 1. Create a character
+Codex will ask for a natural description, create one seed image, show it for approval, build the identity brain, and optionally propose missing body/reference angles only when useful.
 
-```powershell
-aice init maya
-```
+### Existing character
 
-### 2. Register a seed
+You can say:
 
-Inspect the image first and tag only what is actually visible.
+> I already have the character. I want to upload references.
 
-```powershell
-aice seed maya C:\path\seed.png --tags face,front,upper_body
-```
+Codex will invite you to upload **as many images as you want**. After each batch it keeps accepting more until you say `done`. It inspects and registers them internally, builds the brain, and asks you only about genuinely conflicting permanent details.
 
-### 3. Inspect the profile template
+### Generate new photos
 
-```powershell
-aice profile-template maya
-```
+Once ready, just describe the image:
 
-In normal use the Codex skill inspects trusted images, writes only grounded stable traits, and applies the compact JSON update with `aice set-profile`.
+> old-town cafe, rainy afternoon, candid friend-taken photo
 
-### 4. Build missing reference coverage
+No technical prompt is required.
 
-```powershell
-aice bootstrap-plan maya
-```
-
-The plan returns only missing roles. Generated refs enter as **candidate**. They cannot be used for normal generations until they pass identity/anatomy/stable-trait checks.
-
-If a portrait seed does not establish body geometry, the engine will not silently generate a full body and then recursively treat it as truth. It may propose one high-extrapolation `full_body_front` anchor, but that anchor requires explicit user approval before side/back body refs can derive from it.
-
-### 5. Generate through Codex
-
-With the plugin/skill active, a short request is enough:
+## Architecture
 
 ```text
-Generate Maya in an old-town cafe on a rainy afternoon, candid friend-taken photo.
+Friendly Codex conversation
+          |
+          v
+ Interactive guide/state machine
+          |
+          +-------------------+
+          |                   |
+          v                   v
+ Evidence brain        Trusted reference bank
+ (provenance +          golden / trusted /
+ conflict resolver)     candidate / rejected
+          |                   |
+          +---------+---------+
+                    v
+        deterministic context compiler
+                    |
+        selective references + tiny history
+                    |
+                    v
+           Codex built-in image_gen
+                    |
+              adaptive validation
+                    |
+             <= 1 targeted repair
+                    |
+                    v
+               final image
 ```
 
-The skill runs a compact context compile, opens only selected references, invokes built-in image generation once, validates according to budget, applies at most one targeted correction, and records the final content fingerprint. If the requested camera geometry is not covered by trusted references, the context reports a `coverage_gaps` list so Codex can lazily expand the reference bank instead of silently hallucinating confidence.
+The local Python layer is standard-library-only and owns deterministic state. Codex owns semantic interpretation and visual inspection. Built-in `image_gen` owns image creation/editing.
 
-## Budgets
+## Character brain
 
-| Mode | Ref cap | History window | Validation | Repair cap |
+The brain is not one long prose prompt. Stable facts are stored as an evidence ledger.
+
+Example conceptually:
+
+```text
+identity.hair.color = "jet black"
+  source: user-face-front-...
+  authority: golden
+
+identity.eyes.color = conflict
+  brown  <- golden reference A
+  hazel  <- golden reference B
+```
+
+When evidence is near-tied, the engine asks rather than silently choosing. A direct user lock becomes authoritative.
+
+Permanent features can include visibility metadata:
+
+```json
+{
+  "kind": "tattoo",
+  "location": "left_wrist",
+  "description": "small minimalist crescent",
+  "visibility_tags": ["hands", "arms"]
+}
+```
+
+That feature is omitted from active context when the wrist/arm is not expected to be visible.
+
+## Reference trust model
+
+- **golden** — user-supplied or explicitly user-approved source of truth
+- **trusted** — generated reference that passed identity/anatomy/stable-trait checks
+- **candidate** — generated but not trusted yet
+- **rejected** — failed quality gate
+
+Generated references cannot directly enter trusted/golden state. They require trusted parents and validation; golden promotion additionally requires explicit user approval.
+
+## Usage budgets
+
+| mode | selected refs | recent approved history | validation | max repair |
 |---|---:|---:|---|---:|
-| `economy` | 2 | 4 | critical-only | 0 |
-| `balanced` | 3 | 8 | light | 1 |
-| `quality` | 4 | 12 | full | 1 |
+| economy | 2 | 4 | critical | 0 |
+| balanced | 3 | 8 | light | 1 |
+| quality | 4 | 12 | full | 1 |
 
 `balanced` is the default.
 
-Example:
+## Local runtime data
 
-```powershell
-aice context maya "walking through Rome at sunset" --budget balanced --compact
-aice prompt maya "walking through Rome at sunset" --budget balanced
-```
-
-## Character data layout
-
-Runtime state is local and ignored by git:
+Character data stays in `.aice/` and is gitignored:
 
 ```text
 .aice/
   characters/
-    maya/
+    <character>/
       character.json
+      brain.json
+      onboarding.json
       references/
-        manifest.json
-        golden/
-        trusted/
-        candidates/
-        rejected/
       outputs/
-        drafts/
-        approved/
-        rejected/
       history/
-        generations.jsonl
       cache/
 ```
 
-### Trust model
+Do not commit this directory if the repository is public.
 
-- `golden`: user-uploaded or explicitly user-approved source of truth
-- `trusted`: generated reference that passed the required quality gate
-- `candidate`: generated but not yet trusted
-- `rejected`: failed quality gate
+## Developer commands
 
-Normal image generations select only `golden` and `trusted` references.
-
-## Character brain
-
-`character.json` separates:
-
-- immutable/stable identity evidence
-- body evidence
-- permanent features with visibility tags
-- mutable continuity state
-- content-style preferences
-- hard identity rules
-
-Unknown means unknown. The engine is designed not to turn guesses into identity truth.
-
-## Anti-repetition memory
-
-The engine does not resend past images. It stores a tiny fingerprint per accepted generation:
-
-```json
-{
-  "shot": "waist-up",
-  "angle": "3q-right",
-  "gaze": "away",
-  "pose": "walking",
-  "environment": "old-town-street",
-  "lighting": "late-afternoon",
-  "outfit": "red-shirt"
-}
-```
-
-Repeated recent values become compact "avoid repeating ..." hints in the next context.
-
-## Useful commands
+Normal users should not need these. They exist so Codex and developers can operate/test the deterministic engine.
 
 ```text
 aice doctor
-aice init <name>
-aice seed <character> <image> [--tags ...]
-aice profile-template <character>
-aice set-profile <character> --json <json-or-file>
-aice add-ref <character> <image> --role ...
-aice promote-ref <character> <ref-id> --checks ...
-aice reject-ref <character> <ref-id> --reason ...
-aice list-refs <character>
+aice guide [character]
+aice begin <name> --origin scratch|references
+aice characters
+aice add-ref ...
+aice refs-done <character>
+aice observe <character> --json ...
+aice brain <character>
+aice lock-fact <character> <path> --value ...
 aice bootstrap-plan <character>
-aice context <character> "<prompt>" --budget balanced --compact
-aice prompt <character> "<prompt>" --budget balanced
-aice record <character> <image> --prompt ... --fingerprint ...
+aice context <character> "..." --compact
+aice prompt <character> "..."
+aice record ...
 aice stats <character>
 ```
 
-## Test
+## Manual developer setup
 
-```powershell
+Requires Python 3.11+.
+
+```bash
+python -m pip install -e .
+aice doctor
 python -m unittest discover -s tests -v
 ```
 
-The tests need no network and no OpenAI API key.
+Personal plugin installation can also be invoked directly:
 
-## Design boundaries
+```bash
+python scripts/install.py
+```
 
-This project is for persistent **adult synthetic/original/authorized** visual characters. Keep a virtual-creator account transparently presented as virtual/synthetic; do not use the workflow to impersonate real people without permission.
+## Design principles
+
+1. friendly conversation outside, deterministic state machine inside
+2. evidence before assumption
+3. explicit conflict instead of confident guessing
+4. generated refs never bootstrap trust recursively
+5. smallest useful context per image
+6. unlimited user references, selective model references
+7. one normal generation; one bounded repair at most
+8. cache unchanged visual analysis
+9. keep implementation small enough to audit
+10. treat visual-model consistency limits as measurable engineering constraints, not something software can magically eliminate
 
 ## Status
 
-`v0.1.0` is intentionally a focused single-character engine: state, trusted-reference bootstrap, lazy reference expansion, deterministic reference selection, prompt/context budgeting, anti-repetition fingerprints, bounded validation policy, and Codex-native image generation orchestration.
+`v0.2.0` focuses on the interactive single-character workflow, evidence-graph brain, reference provenance, conflict handling, lazy expansion, token/call optimization, personal Codex plugin installation, and cross-platform tests.
