@@ -109,7 +109,7 @@ def download(
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_suffix(dest.suffix + ".part")
 
-    attempts = 5
+    attempts = 8
     for attempt in range(1, attempts + 1):
         have = part.stat().st_size if (resume and part.exists()) else 0
         if have and spec.size_bytes and have >= spec.size_bytes:
@@ -134,7 +134,12 @@ def download(
                         done += len(block)
                         if progress:
                             progress(done, total)
-            break
+            if not total or done >= total:
+                break
+            # short read: server closed the stream early, no exception raised
+            if attempt == attempts:
+                break  # let the size check below report it
+            time.sleep(3 * attempt)  # resume from the partial next loop
         except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as exc:
             if attempt == attempts:
                 raise OSError(f"{spec.filename}: download failed after {attempts} tries ({exc})") from None
