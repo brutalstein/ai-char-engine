@@ -26,6 +26,19 @@ class CliTests(unittest.TestCase):
             result = self.run_cli("--home", str(home), "guide", "maya")
             self.assertEqual(json.loads(result.stdout)["stage"], "collect_references")
 
+    def test_approved_generated_seed_has_dedicated_path(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            home = root / ".aice"
+            seed = root / "generated.png"
+            seed.write_bytes(b"generated-seed")
+            self.assertEqual(self.run_cli("--home", str(home), "begin", "Nova", "--origin", "scratch").returncode, 0)
+            result = self.run_cli("--home", str(home), "approve-seed", "nova", str(seed))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["reference"]["source"], "generated_approved")
+            self.assertEqual(payload["reference"]["tier"], "golden")
+
     def test_doctor_needs_no_api_key(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             result = self.run_cli("--home", str(Path(td) / ".aice"), "doctor")
