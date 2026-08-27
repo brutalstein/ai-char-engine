@@ -1,3 +1,3 @@
-"""AI Character Engine deterministic state layer."""
+"""AI Character Engine: persistent, evidence-grounded character state for Codex."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
