@@ -26,8 +26,6 @@ from .router import BackendProbe
 
 _BOOTSTRAP_MODEL = "qwen_image_t2i_gguf_q3km"
 _BOOTSTRAP_LORA = "qwen_image_t2i_lightning_8step"
-
-# Local explicit-adult profile (see comfy/registry.json capability "adult_explicit").
 _ADULT_MODEL = "lustify_sdxl_v4"
 _ADULT_IPADAPTER = "ip_adapter_plus_sdxl_vith"
 _ADULT_CLIP_VISION = "clip_vision_vith"
@@ -45,12 +43,16 @@ class ComfyUIProvider(ImageProvider):
         runtime: ComfyRuntime | None = None,
         hardware: hwmod.HardwareProfile | None = None,
         workflow: WorkflowAdapter | None = None,
+        validation_required: bool = True,
     ):
         self.cfg = config or cfgmod.load_config()
         self.runtime = runtime or ComfyRuntime(self.cfg)
         self.hw = hardware or hwmod.load_cached() or hwmod.detect()
         self.workflow = workflow or WorkflowAdapter("qwen_edit_identity")
         self.models_dir = Path(self.cfg["models_dir"])
+        # Smoke tests deliberately bypass the readiness bit while proving it. Normal
+        # product execution must never advertise/run an unvalidated capability.
+        self.validation_required = validation_required
 
     def _base_available(self) -> tuple[bool, str]:
         if not self.runtime.is_installed():
@@ -59,6 +61,13 @@ class ComfyUIProvider(ImageProvider):
             return False, "no usable GPU detected"
         return True, "ready"
 
+    def _validation_ok(self, capability: str) -> tuple[bool, str]:
+        if not self.validation_required:
+            return True, "validation bypassed for smoke"
+        if not cfgmod.capability_validated(self.cfg, capability):
+            return False, f"{capability} capability has not passed its local smoke test"
+        return True, "validated"
+
     def available(self) -> tuple[bool, str]:
         ok, why = self._base_available()
         if not ok:
@@ -66,7 +75,7 @@ class ComfyUIProvider(ImageProvider):
         missing = modelmod.capability_missing(self.models_dir, "identity")
         if missing:
             return False, f"missing identity model files: {', '.join(missing)}"
-        return True, "ready"
+        return self._validation_ok("identity")
 
     def bootstrap_available(self) -> tuple[bool, str]:
         ok, why = self._base_available()
@@ -75,7 +84,7 @@ class ComfyUIProvider(ImageProvider):
         missing = modelmod.capability_missing(self.models_dir, "bootstrap")
         if missing:
             return False, f"local bootstrap not installed: {', '.join(missing)}"
-        return True, "ready"
+        return self._validation_ok("bootstrap")
 
     def _adult_node_present(self) -> bool:
         nodes = self.cfg.get("pins", {}).get("custom_nodes", []) or []
@@ -91,17 +100,18 @@ class ComfyUIProvider(ImageProvider):
             return False, f"local adult model not installed: {', '.join(missing)}"
         if not self._adult_node_present():
             return False, f"required custom node missing: {_ADULT_NODE}"
-        return True, "ready"
+        return self._validation_ok("adult_explicit")
 
     def capabilities(self) -> ProviderCapabilities:
         bootstrap, _ = self.bootstrap_available()
         adult, _ = self.adult_available()
+        identity, _ = self.available()
         return ProviderCapabilities(
             provider=self.name,
             bootstrap_without_reference=bootstrap,
-            identity_generation=True,
-            reference_expansion=True,
-            targeted_repair=True,
+            identity_generation=identity,
+            reference_expansion=identity,
+            targeted_repair=identity,
             multi_reference=True,
             max_references=3,
             local=True,
@@ -110,11 +120,16 @@ class ComfyUIProvider(ImageProvider):
         )
 
     def available_for(self, req: GenerationRequest) -> tuple[bool, str]:
+        # Explicit generation requires an existing trusted identity reference. The
+        # LUSTIFY workflow is reference-driven; never let an explicit scratch seed
+        # fall through to the unrelated Qwen bootstrap path.
+        if req.explicit == "explicit":
+            if req.operation == "bootstrap":
+                return False, "explicit generation requires an approved identity seed first"
+            return self.adult_available()
         if req.operation == "bootstrap":
             return self.bootstrap_available()
-        if req.explicit == "explicit":
-            return self.adult_available()
-        return super().available_for(req)
+        return self.available()
 
     def probe(self) -> BackendProbe:
         installed = self.runtime.is_installed()
@@ -127,7 +142,7 @@ class ComfyUIProvider(ImageProvider):
         return BackendProbe(
             installed=installed,
             configured=bool(self.cfg.get("pins")),
-            validated=bool(self.cfg.get("validated")),
+            validated=cfgmod.capability_validated(self.cfg, "identity"),
             models_present=not missing,
             nodes_present=nodes_ok,
             server_ok=bool(status.get("healthy")),
@@ -140,7 +155,7 @@ class ComfyUIProvider(ImageProvider):
         started = time.monotonic()
         try:
             return self._generate_once(req, started, progress)
-        except (ComfyError, WorkflowError) as exc:
+        except (ComfyError, WorkflowError, OSError) as exc:
             emit_progress(progress, "recovering", backend=self.name, reason=str(exc))
             recovered = self._recover()
             if recovered is None:
@@ -155,7 +170,7 @@ class ComfyUIProvider(ImageProvider):
                 result = self._generate_once(req, started, progress)
                 result.warnings.append(f"recovered after: {exc}")
                 return result
-            except (ComfyError, WorkflowError) as exc2:
+            except (ComfyError, WorkflowError, OSError) as exc2:
                 emit_progress(progress, "provider_failed", backend=self.name, error=str(exc2))
                 return GenerationResult(
                     backend=self.name,
@@ -176,12 +191,14 @@ class ComfyUIProvider(ImageProvider):
             return None
 
     def _workflow_and_model(self, req: GenerationRequest):
-        """Return (workflow, override_spec | None, lora_filename | None).
-
-        ``override_spec`` forces a specific checkpoint/unet for a non-default
-        operation (bootstrap or explicit-adult); ``None`` keeps the tuned Qwen
-        identity model resolved by policy.
-        """
+        """Return (workflow, override_spec | None, lora_filename | None)."""
+        if req.explicit == "explicit":
+            if req.operation == "bootstrap":
+                raise WorkflowError("explicit generation requires an approved identity seed first")
+            ok, why = self.adult_available()
+            if not ok:
+                raise WorkflowError(why)
+            return WorkflowAdapter(_ADULT_WORKFLOW), modelmod.model_specs()[_ADULT_MODEL], None
         if req.operation == "bootstrap":
             ok, why = self.bootstrap_available()
             if not ok:
@@ -192,11 +209,6 @@ class ComfyUIProvider(ImageProvider):
                 specs[_BOOTSTRAP_MODEL],
                 specs[_BOOTSTRAP_LORA].filename,
             )
-        if req.explicit == "explicit":
-            ok, why = self.adult_available()
-            if not ok:
-                raise WorkflowError(why)
-            return WorkflowAdapter(_ADULT_WORKFLOW), modelmod.model_specs()[_ADULT_MODEL], None
         return self.workflow, None, None
 
     def _generate_once(
@@ -277,8 +289,6 @@ class ComfyUIProvider(ImageProvider):
 
         render_refs = list(uploaded)
         if is_adult and len(render_refs) == 1:
-            # The IP-Adapter ImageBatch node needs two inputs; feed the lone
-            # reference twice (an identical embed, no identity change).
             render_refs = render_refs * 2
 
         seed = req.seed if req.seed is not None else random.randint(1, 2**31 - 1)
