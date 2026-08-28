@@ -10,6 +10,7 @@ from .utils import atomic_write_json, read_json, sha256_file, slugify, utc_now
 SCHEMA_VERSION = 2
 REFERENCE_TIERS = {"golden", "trusted", "candidate", "rejected"}
 TRUSTED_TIERS = {"golden", "trusted"}
+BACKEND_PREFERENCES = {"unset", "auto", "comfyui", "codex_builtin", "ask_each_time"}
 
 
 def engine_home(explicit: str | None = None) -> Path:
@@ -87,6 +88,7 @@ def create_character(home: Path, display_name: str, *, origin: str = "unknown") 
         "created_at": utc_now(),
         "adult": True,
         "mutable_state": {},
+        "generation_preferences": {"backend": "unset"},
         "content_style": {
             "preferred": ["photorealistic", "natural", "candid"],
             "avoid": ["repetitive pose", "plastic skin", "CGI look"],
@@ -132,6 +134,7 @@ def _migrate_profile(char_dir: Path, profile: dict[str, Any]) -> dict[str, Any]:
         "created_at": profile.get("created_at", utc_now()),
         "adult": bool(profile.get("identity", {}).get("adult", True)),
         "mutable_state": profile.get("mutable_state", {}),
+        "generation_preferences": {"backend": "unset"},
         "content_style": profile.get("content_style", {"preferred": [], "avoid": []}),
         "hard_rules": profile.get("hard_rules", []),
     }
@@ -160,6 +163,22 @@ def load_profile(home: Path, character: str) -> tuple[Path, dict[str, Any]]:
     return char_dir, _migrate_profile(char_dir, profile)
 
 
+def get_backend_preference(profile: dict[str, Any]) -> str:
+    preference = str(profile.get("generation_preferences", {}).get("backend", "unset"))
+    return preference if preference in BACKEND_PREFERENCES else "unset"
+
+
+def set_backend_preference(char_dir: Path, profile: dict[str, Any], preference: str) -> dict[str, Any]:
+    preference = str(preference).strip().casefold()
+    if preference not in BACKEND_PREFERENCES:
+        raise ValueError(f"backend preference must be one of: {', '.join(sorted(BACKEND_PREFERENCES))}")
+    prefs = profile.setdefault("generation_preferences", {})
+    prefs["backend"] = preference
+    prefs["updated_at"] = utc_now()
+    save_profile(char_dir, profile)
+    return dict(prefs)
+
+
 def save_profile(char_dir: Path, profile: dict[str, Any]) -> None:
     if profile.get("schema_version") != SCHEMA_VERSION:
         raise ValueError(f"character.json schema_version must be {SCHEMA_VERSION}")
@@ -167,6 +186,9 @@ def save_profile(char_dir: Path, profile: dict[str, Any]) -> None:
         raise ValueError("character.json must contain id")
     if profile.get("adult") is not True:
         raise ValueError("This engine is intentionally restricted to adult characters")
+    backend = get_backend_preference(profile)
+    if backend not in BACKEND_PREFERENCES:  # defensive; getter normalizes invalid values
+        raise ValueError("invalid generation backend preference")
     atomic_write_json(profile_path(char_dir), profile)
 
 
