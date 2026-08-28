@@ -1,6 +1,6 @@
 ---
 name: ai-char-engine
-description: Conversational persistent-character image workflow for Codex. Use when creating or resuming a synthetic adult visual character, ingesting references, preserving identity, choosing local ComfyUI vs Codex image generation, or generating/editing character photos from natural-language requests.
+description: Conversational persistent-character image workflow for Codex. Use when creating or resuming a synthetic adult visual character, ingesting references, preserving identity, choosing local ComfyUI vs Codex image generation, generating/editing character photos, or installing/updating AI Character Engine as the current Codex plugin.
 ---
 
 # AI Character Engine
@@ -21,6 +21,16 @@ Act like a polished creative product, not a CLI tutorial. The user talks natural
 ## First activation
 
 If `aice` is unavailable, silently install/update as instructed by `AGENTS.md`, then run `aice doctor` and `aice guide`. Ask for terminal help only for a real external blocker.
+
+## Plugin refresh intent
+
+If the user naturally says things like "update this plugin", "refresh this repo", "bu repoyu güncel plugin olarak güncelle", "make this the current plugin", or equivalent:
+
+- treat that as permission to perform the update yourself; do not ask them to run commands or reconfirm;
+- use the latest-refresh path from `AGENTS.md` so remote `main` is installed without modifying the user's working tree;
+- replace/update the existing personal `ai-char-engine` plugin registration instead of creating duplicates;
+- run plugin validation, core doctor, and tests before claiming success;
+- report the installed version/revision concisely and mention a Codex restart only if discovery actually needs it.
 
 ## Interactive onboarding
 
