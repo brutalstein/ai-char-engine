@@ -1,0 +1,27 @@
+{
+  "name": "qwen_text_to_image",
+  "version": "1.0.0",
+  "description": "Qwen-Image GGUF text-to-image bootstrap workflow. No identity reference is required; intended only for creating a first synthetic-character seed before user approval.",
+  "requires_references": false,
+  "required_class_types": [
+    "UnetLoaderGGUF", "LoraLoaderModelOnly", "CLIPLoader", "VAELoader",
+    "ModelSamplingAuraFlow", "CFGNorm", "CLIPTextEncode",
+    "EmptySD3LatentImage", "KSampler", "VAEDecode", "SaveImage"
+  ],
+  "slots": {
+    "model_path":      {"node": "37", "input": "unet_name"},
+    "lora_name":       {"node": "73", "input": "lora_name"},
+    "positive_prompt": {"node": "6",  "input": "text"},
+    "negative_prompt": {"node": "7",  "input": "text"},
+    "width":           {"node": "58", "input": "width"},
+    "height":          {"node": "58", "input": "height"},
+    "seed":            {"node": "3",  "input": "seed"},
+    "steps":           {"node": "3",  "input": "steps"},
+    "cfg":             {"node": "3",  "input": "cfg"},
+    "sampler":         {"node": "3",  "input": "sampler_name"},
+    "scheduler":       {"node": "3",  "input": "scheduler"},
+    "output_prefix":   {"node": "60", "input": "filename_prefix"}
+  },
+  "reference_slots": [],
+  "text_encoder_nodes": []
+}
