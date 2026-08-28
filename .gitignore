@@ -27,3 +27,6 @@ models/
 *.ckpt
 comfy-server.log
 hardware_profile.json
+
+# Serena MCP local cache
+.serena/
