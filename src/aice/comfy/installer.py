@@ -238,6 +238,10 @@ class ComfyInstaller:
     # -- orchestration -------------------------------------------
     def setup(self, *, model_keys: list[str] | None = None, log: Progress | None = None,
               model_progress: Callable[[str, int, int], None] | None = None) -> dict[str, Any]:
+        # Capture validation identity from THIS installer config before mutating it.
+        # Using cfgmod.load_config() here would make tests/custom homes accidentally
+        # compare against unrelated global user state.
+        old_pins = dict(self.cfg.get("pins", {}))
         pre = self.preflight()
         comfy_sha = self.ensure_comfyui(log)
         self.ensure_venv(log)
@@ -256,21 +260,17 @@ class ComfyInstaller:
             ))
         fetched = self.ensure_models(model_keys, progress=model_progress)
 
-        self.cfg["pins"] = {
+        new_pins = {
             "comfyui_sha": comfy_sha,
             "comfyui_version": self.registry["comfyui"].get("version", ""),
             "custom_nodes": nodes,
             "torch": torch.get("v", ""),
             "torch_cuda": torch.get("cuda", ""),
         }
+        self.cfg["pins"] = new_pins
         self.cfg["profile"] = profile_name
-        # Any changed runtime revision requires a new smoke test before auto-routing.
-        old_pins = cfgmod.load_config().get("pins", {})
-        if old_pins and (
-            old_pins.get("comfyui_sha") != comfy_sha
-            or old_pins.get("custom_nodes") != nodes
-            or old_pins.get("torch") != torch.get("v", "")
-        ):
+        # Any changed runtime identity requires a fresh smoke test before auto-routing.
+        if old_pins and old_pins != new_pins:
             self.cfg["validated"] = False
         cfgmod.save_config(self.cfg)
         return {
