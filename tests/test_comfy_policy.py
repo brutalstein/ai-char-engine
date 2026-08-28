@@ -83,9 +83,9 @@ class PolicyTests(unittest.TestCase):
         self.assertNotEqual((portrait.width, portrait.height), (body.width, body.height))
         self.assertGreater(body.height, body.width)
 
-    def test_upscale_only_in_quality_on_8gb(self) -> None:
+    def test_upscale_is_not_advertised_until_workflow_implements_it(self) -> None:
         self.assertFalse(policy.resolve_settings(_hw(), budget="balanced").upscale)
-        self.assertTrue(policy.resolve_settings(_hw(), budget="quality", free_vram_mb=6000).upscale)
+        self.assertFalse(policy.resolve_settings(_hw(), budget="quality", free_vram_mb=6000).upscale)
 
     def test_server_args_are_lowvram_on_8gb(self) -> None:
         self.assertIn("--lowvram", policy.server_args(_hw()))
