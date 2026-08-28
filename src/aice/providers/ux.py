@@ -8,7 +8,7 @@ from .router import BackendProbe, comfy_ready
 
 
 BACKEND_LABELS = {
-    "auto": "Choose automatically",
+    "auto": "Choose and combine intelligently",
     "comfyui": "Local ComfyUI",
     "codex_builtin": "Codex image generation",
     "ask_each_time": "Ask me each time",
@@ -22,16 +22,17 @@ def safe_comfy_probe() -> tuple[BackendProbe, Any | None]:
 
         provider = ComfyUIProvider()
         return provider.probe(), provider
-    except Exception as exc:  # noqa: BLE001 - optional backend must degrade cleanly
+    except Exception:  # noqa: BLE001 - optional backend must degrade cleanly
         return BackendProbe(installed=False), None
 
 
 def backend_dialog(preference: str, probe: BackendProbe) -> dict[str, Any]:
-    """Pure backend UX decision used by the wizard, CLI and tests.
+    """Pure conversational backend decision.
 
-    Codex built-in image generation is considered available from the plugin's
-    perspective. ComfyUI becomes a user-facing option only after its real local
-    smoke test has validated the runtime.
+    `auto` is intentionally more than fallback routing: AICE chooses the best primary
+    engine for the operation and may permit the other engine for one justified repair
+    or reference-expansion stage after validation. It never spends an extra call just
+    because two engines exist.
     """
     preference = preference if preference in BACKEND_LABELS or preference == "unset" else "unset"
     local_ready, local_reason = comfy_ready(probe)
@@ -44,7 +45,8 @@ def backend_dialog(preference: str, probe: BackendProbe) -> dict[str, Any]:
         "local_ready": local_ready,
         "local_reason": local_reason,
         "available": available,
-        "recommended": "comfyui" if local_ready else "codex_builtin",
+        "recommended": "auto" if local_ready else "codex_builtin",
+        "auto_is_capability_aware": True,
         "needs_user_choice": False,
     }
 
@@ -54,13 +56,13 @@ def backend_dialog(preference: str, probe: BackendProbe) -> dict[str, Any]:
             "stage": "choose_backend",
             "needs_user_choice": True,
             "user_message": (
-                "Both image engines are ready. Would you like this image made with local ComfyUI, "
-                "Codex image generation, or should I choose automatically? You can also ask me each time."
+                "Both image engines are ready. Do you want local ComfyUI, Codex image generation, "
+                "or should I choose and combine them intelligently when useful? I can also ask each time."
             ),
             "choices": [
+                {"value": "auto", "label": BACKEND_LABELS["auto"]},
                 {"value": "comfyui", "label": BACKEND_LABELS["comfyui"]},
                 {"value": "codex_builtin", "label": BACKEND_LABELS["codex_builtin"]},
-                {"value": "auto", "label": BACKEND_LABELS["auto"]},
                 {"value": "ask_each_time", "label": BACKEND_LABELS["ask_each_time"]},
             ],
         }
@@ -78,19 +80,15 @@ def backend_dialog(preference: str, probe: BackendProbe) -> dict[str, Any]:
                 {"value": "repair_comfyui", "label": "Set up / repair local ComfyUI"},
                 {"value": "codex_builtin_once", "label": "Use Codex image generation this time"},
                 {"value": "codex_builtin", "label": "Switch to Codex image generation"},
-                {"value": "auto", "label": "Switch to automatic"},
+                {"value": "auto", "label": "Switch to intelligent automatic mode"},
             ],
         }
 
     effective = preference
-    if preference == "unset":
-        # There is only one viable engine, so do not ask a pointless question.
-        effective = "codex_builtin"
-    elif preference == "ask_each_time":
-        # ask_each_time only reaches here when ComfyUI is not viable.
+    if preference in {"unset", "ask_each_time"}:
         effective = "codex_builtin"
     elif preference == "auto":
-        effective = "comfyui" if local_ready else "codex_builtin"
+        effective = "auto" if local_ready else "codex_builtin"
 
     return {
         **base,
