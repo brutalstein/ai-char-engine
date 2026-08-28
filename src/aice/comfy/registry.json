@@ -1,6 +1,6 @@
 {
-  "schema_version": 1,
-  "note": "Pinned model/runtime stack for the Qwen-Image-Edit-2509 GGUF identity workflow. Runtime repositories are checked out at exact revisions; model files are verified by size and SHA-256. Nothing here is committed as a binary.",
+  "schema_version": 2,
+  "note": "Pinned runtime plus two auditable Qwen GGUF capabilities: required Qwen-Image-Edit-2509 identity generation and optional Qwen-Image text-to-image bootstrap. Bootstrap weights are downloaded only when requested. Model files are verified by exact size and SHA-256.",
   "comfyui": {
     "repo": "https://github.com/Comfy-Org/ComfyUI.git",
     "pin": "12d5279438bfefc058a269eae805ceab6047777f",
@@ -19,6 +19,20 @@
     "index_url": "https://download.pytorch.org/whl/cu130",
     "packages": ["torch", "torchvision", "torchaudio"],
     "reason": "cu130 ships Blackwell (sm_120) CUDA kernels required by RTX 50-series GPUs"
+  },
+  "capability_models": {
+    "identity": [
+      "qwen_image_edit_2509_gguf_q3km",
+      "qwen_image_edit_2509_lightning_8step",
+      "qwen_2.5_vl_7b_fp8_scaled",
+      "qwen_image_vae"
+    ],
+    "bootstrap": [
+      "qwen_image_t2i_gguf_q3km",
+      "qwen_image_t2i_lightning_8step",
+      "qwen_2.5_vl_7b_fp8_scaled",
+      "qwen_image_vae"
+    ]
   },
   "models": {
     "qwen_image_edit_2509_gguf_q3km": {
@@ -50,6 +64,26 @@
       "license": "Apache-2.0",
       "vram_class": "small",
       "required": true
+    },
+    "qwen_image_t2i_gguf_q3km": {
+      "filename": "qwen-image-Q3_K_M.gguf",
+      "dest_subdir": "diffusion_models",
+      "url": "https://huggingface.co/city96/Qwen-Image-gguf/resolve/main/qwen-image-Q3_K_M.gguf",
+      "size_bytes": 9679567392,
+      "sha256": "ff96f80b90f8234e498c803965857d7850f89011dde805f83f1e80aa741bcdfb",
+      "license": "Apache-2.0",
+      "vram_class": "8gb-cpu-offload",
+      "required": false
+    },
+    "qwen_image_t2i_lightning_8step": {
+      "filename": "Qwen-Image-Lightning-8steps-V1.0.safetensors",
+      "dest_subdir": "loras",
+      "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Lightning-8steps-V1.0.safetensors",
+      "size_bytes": 1698951104,
+      "sha256": "07b5a999881437f63124979844ba1949ce2438f65b6220628a196a7d30a4fff9",
+      "license": "Apache-2.0",
+      "vram_class": "cpu-offloaded",
+      "required": false
     },
     "qwen_2.5_vl_7b_fp8_scaled": {
       "filename": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
