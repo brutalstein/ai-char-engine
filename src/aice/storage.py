@@ -164,7 +164,7 @@ def load_profile(home: Path, character: str) -> tuple[Path, dict[str, Any]]:
 
 
 def get_backend_preference(profile: dict[str, Any]) -> str:
-    preference = str(profile.get("generation_preferences", {}).get("backend", "unset"))
+    preference = str(profile.get("generation_preferences", {}).get("backend", "unset")).strip().casefold()
     return preference if preference in BACKEND_PREFERENCES else "unset"
 
 
@@ -186,8 +186,8 @@ def save_profile(char_dir: Path, profile: dict[str, Any]) -> None:
         raise ValueError("character.json must contain id")
     if profile.get("adult") is not True:
         raise ValueError("This engine is intentionally restricted to adult characters")
-    backend = get_backend_preference(profile)
-    if backend not in BACKEND_PREFERENCES:  # defensive; getter normalizes invalid values
+    raw_backend = str(profile.get("generation_preferences", {}).get("backend", "unset")).strip().casefold()
+    if raw_backend not in BACKEND_PREFERENCES:
         raise ValueError("invalid generation backend preference")
     atomic_write_json(profile_path(char_dir), profile)
 
@@ -347,19 +347,30 @@ def promote_reference(
     return record
 
 
-def reject_reference(char_dir: Path, ref_id: str, reason: str) -> dict[str, Any]:
+def reject_reference(
+    char_dir: Path,
+    ref_id: str,
+    reason: str,
+    *,
+    user_approved: bool = False,
+) -> dict[str, Any]:
     manifest = load_manifest(char_dir)
     record = _record_by_id(manifest, ref_id)
+    if record.get("tier") == "golden" and not user_approved:
+        raise ValueError("Rejecting a golden source-of-truth reference requires explicit user approval")
     old_path = char_dir / record["path"]
     new_dir = char_dir / "references" / "rejected"
     new_dir.mkdir(parents=True, exist_ok=True)
     new_path = new_dir / old_path.name
     if old_path.exists() and old_path.resolve() != new_path.resolve():
         shutil.move(str(old_path), str(new_path))
+    was_golden = record.get("tier") == "golden"
     record["tier"] = "rejected"
     record["trust"] = 0.0
     record["path"] = str(new_path.relative_to(char_dir))
     record["rejected_at"] = utc_now()
+    if was_golden:
+        record["user_approved_rejection_at"] = utc_now()
     record["notes"] = (record.get("notes", "") + f"\nRejected: {reason}").strip()
     save_manifest(char_dir, manifest)
     return record
