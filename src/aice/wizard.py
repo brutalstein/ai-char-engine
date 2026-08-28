@@ -92,12 +92,12 @@ def guide(home, character: str | None = None) -> dict[str, Any]:
         }
 
     if state.get("ready"):
-        return {
-            "stage": "ready",
-            "character": profile["id"],
-            "user_message": "Character is ready. Tell me the photo you want in ordinary language.",
-            "choices": [],
-        }
+        # Backend choice is deterministic state too. Codex surfaces the friendly
+        # message, while all health/probe mechanics stay hidden from the user.
+        from .providers.ux import backend_status
+
+        backend = backend_status(home, profile["id"])
+        return {"character": profile["id"], "backend": backend, **backend}
 
     try:
         plan = bootstrap_plan(home, character)
