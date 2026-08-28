@@ -25,6 +25,7 @@ def backend_health() -> dict[str, Any]:
     installed = rt.is_installed()
     identity_missing = modelmod.capability_missing(rt.models_dir, "identity") if installed else None
     bootstrap_missing = modelmod.capability_missing(rt.models_dir, "bootstrap") if installed else None
+    adult_missing = modelmod.capability_missing(rt.models_dir, "adult_explicit") if installed else None
     if not installed:
         state = "unavailable"
     elif identity_missing or not cfg.get("validated"):
@@ -45,6 +46,8 @@ def backend_health() -> dict[str, Any]:
             "identity": installed and not bool(identity_missing) and bool(cfg.get("validated")),
             "bootstrap": installed and not bool(bootstrap_missing) and bool(cfg.get("validated")),
             "bootstrap_missing": bootstrap_missing,
+            "adult_explicit": installed and not bool(adult_missing) and bool(cfg.get("validated")),
+            "adult_explicit_missing": adult_missing,
         },
         "runtime_dir": str(rt.runtime_dir),
         "url": rt.base_url,
@@ -142,6 +145,10 @@ def doctor(*, smoke: bool = False) -> dict[str, Any]:
                 bootstrap = WorkflowAdapter("qwen_text_to_image")
                 bootstrap.validate(keys)
                 check("bootstrap_workflow_nodes", True, f"v{bootstrap.version}")
+            if modelmod.capability_ready(rt.models_dir, "adult_explicit"):
+                adult = WorkflowAdapter("lustify_sdxl_adult")
+                adult.validate(keys)
+                check("adult_workflow_nodes", True, f"v{adult.version}")
         except Exception as exc:  # noqa: BLE001
             check("workflow_nodes", False, str(exc))
 
@@ -236,6 +243,7 @@ def _smoke_test(rt: ComfyRuntime, hw: hwmod.HardwareProfile) -> dict[str, Any]:
     return {
         "ok": winner is not None,
         "winner": winner,
+        "adult": _adult_smoke(rt, hw),
         "gpu": hw.gpu_name,
         "vram_total_mb": hw.vram_total_mb,
         "status": best.get("status", "failed"),
@@ -249,6 +257,55 @@ def _smoke_test(rt: ComfyRuntime, hw: hwmod.HardwareProfile) -> dict[str, Any]:
         "attempts": attempts,
         "at": _utc(),
     }
+
+
+def _adult_smoke(rt: ComfyRuntime, hw: hwmod.HardwareProfile) -> dict[str, Any]:
+    """One real LUSTIFY (explicit-adult profile) generation, if its models are present.
+
+    Non-explicit prompt on purpose: this validates the SDXL + IP-Adapter graph and
+    8 GB fit, not the model's uncensored behaviour.
+    """
+    if not modelmod.capability_ready(rt.models_dir, "adult_explicit"):
+        return {"ok": False, "skipped": "adult_explicit models not installed"}
+
+    import tempfile
+    import time
+    from pathlib import Path
+
+    from ..providers.base import GenerationRequest
+    from ..providers.comfyui import ComfyUIProvider
+
+    with tempfile.TemporaryDirectory() as td:
+        ref = Path(td) / "adult_smoke_ref.png"
+        ref.write_bytes(_tiny_png())
+        out = Path(td) / "adult_out"
+        req = GenerationRequest(
+            character="smoke", prompt="a natural candid portrait photo of an adult person, soft window light",
+            reference_paths=(ref,), aspect="portrait", budget="balanced",
+            explicit="explicit", seed=1234, out_dir=out,
+        )
+        t0 = time.monotonic()
+        try:
+            result = ComfyUIProvider(config=cfgmod.load_config(), hardware=hw).generate(req)
+            dt = round(time.monotonic() - t0, 1)
+            ok = result.status == "ok" and result.output_path is not None
+            return {
+                "ok": ok, "status": result.status, "error": result.error, "duration_s": dt,
+                "model_id": result.model_id, "workflow_version": result.workflow_version,
+                "resolution": [result.effective_settings.get("width"), result.effective_settings.get("height")],
+                "ipadapter_weight": result.effective_settings.get("ipadapter_weight"),
+                "output_bytes": (result.output_path.stat().st_size
+                                 if result.output_path and result.output_path.exists() else 0),
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "status": "crash", "error": repr(exc),
+                    "duration_s": round(time.monotonic() - t0, 1)}
+        finally:
+            try:
+                rt.client().free()
+                time.sleep(3)
+            except Exception:  # noqa: BLE001
+                pass
 
 
 def _utc() -> str:

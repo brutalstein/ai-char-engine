@@ -30,6 +30,22 @@ def build_plan(
     mode = mode if mode in VALID_STRATEGIES else "auto"
     ref_count = len(req.normalized_references())
 
+    if getattr(req, "explicit", "normal") == "explicit":
+        # Policy, not a capability trade-off: explicit adult synthetic content is
+        # only ever produced by the local ComfyUI LUSTIFY profile. Never the
+        # built-in cloud generator, and never a silent cross-provider fallback.
+        return GenerationPlan(
+            strategy="local-adult",
+            primary_provider="comfyui",
+            stages=(PlanStage("primary", "comfyui", req.operation, True,
+                              "Explicit adult content uses the local adult profile only."),),
+            allow_cross_provider_repair=False,
+            allow_cross_provider_reference_reuse=True,
+            reason=("Local adult profile ready." if local_request_ready else
+                    "Explicit adult content must stay on the local adult backend; "
+                    "if it is unavailable the request is not downgraded to cloud generation."),
+        )
+
     if mode == "comfyui":
         return GenerationPlan(
             strategy="forced-local",

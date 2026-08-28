@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from ..engine import build_context, render_generation_prompt
+from ..intent import DISALLOWED, classify_explicitness
 from ..selector import infer_tags
 from ..storage import get_backend_preference, load_profile
 from .base import GenerationRequest, GenerationResult, ProgressCallback, ReferenceInput
@@ -16,6 +17,24 @@ from .codex_builtin import CodexBuiltinProvider
 from .planner import build_plan
 from .router import comfy_ready
 from .ux import backend_dialog, safe_comfy_probe
+
+
+_REFUSAL_TEXT = (
+    "I can't generate this image. AI Character Engine is limited to adult synthetic "
+    "or user-authorized characters and never produces sexual content involving minors, "
+    "incest, non-consent, sexual violence, real-person sexual deepfakes, or "
+    "hidden-camera scenarios."
+)
+
+
+def _refused_result(verdict: Any) -> GenerationResult:
+    return GenerationResult(
+        backend="",
+        status="refused",
+        error=_REFUSAL_TEXT,
+        handoff={"policy": "adult synthetic / user-authorized characters only",
+                 "matched": list(getattr(verdict, "matched", ()))},
+    )
 
 
 def _aspect_from_tags(tags: set[str]) -> str:
@@ -51,6 +70,7 @@ def _request_from_context(
     out_dir: Path | None,
     operation: str,
     repair_of: Path | None,
+    explicit: str = "normal",
 ) -> GenerationRequest:
     tags = infer_tags(request_text)
     ref_rows = context.get("references", [])
@@ -75,6 +95,7 @@ def _request_from_context(
         aspect=_aspect_from_tags(tags),
         budget=budget,
         operation=operation,
+        explicit=explicit,
         seed=seed,
         repair_of=repair_of,
         out_dir=out_dir,
@@ -148,16 +169,42 @@ def _execute(
     })
     report({"stage": "backend_selected", "requested": mode, "backend": chosen})
 
+    explicit_adult = getattr(req, "explicit", "normal") == "explicit"
+
     if chosen == "comfyui":
         if provider is None or not local_request_ready:
-            result = GenerationResult(
-                backend="comfyui",
-                status="failed",
-                error="Local ComfyUI was selected but is not ready for this operation.",
-            )
+            if explicit_adult:
+                why = provider.adult_available()[1] if provider is not None else "local backend not installed"
+                report({"stage": "backend_setup_required", "backend": "comfyui",
+                        "capability": "adult_explicit", "reason": why})
+                result = GenerationResult(
+                    backend="comfyui",
+                    status="local_adult_unavailable",
+                    error=(
+                        "The local adult image backend (LUSTIFY SDXL) is not ready yet "
+                        f"({why}), so this explicit request was not generated. Explicit "
+                        "adult content is never sent to the built-in cloud generator."
+                    ),
+                    handoff={
+                        "setup": "aice comfy setup --capabilities adult_explicit",
+                        "then": "aice comfy doctor --smoke",
+                        "reason": why,
+                        "non_explicit_alternative": (
+                            "Ask for a non-explicit version of this image and the "
+                            "standard profile can generate it now."
+                        ),
+                    },
+                )
+            else:
+                result = GenerationResult(
+                    backend="comfyui",
+                    status="failed",
+                    error="Local ComfyUI was selected but is not ready for this operation.",
+                )
         else:
             result = provider.generate(req, progress=report)
-        if result.status == "failed" and mode in {"auto", "hybrid"}:
+        # Explicit adult never silently downgrades to built-in cloud image generation.
+        if result.status == "failed" and mode in {"auto", "hybrid"} and not explicit_adult:
             report({"stage": "fallback_planned", "from": "comfyui", "to": "codex_builtin"})
             fallback = builtin.generate(req, progress=report)
             fallback.warnings.insert(0, f"comfyui failed ({result.error}); planned built-in fallback")
@@ -192,6 +239,16 @@ def plan_and_generate(
         if progress is not None:
             progress(dict(event))
 
+    verdict = classify_explicitness(request_text)
+    report({"stage": "intent_classified", "level": verdict.level,
+            "matched": list(verdict.matched), "wants_local_adult": verdict.wants_local_adult})
+    if verdict.level == DISALLOWED:
+        report({"stage": "request_refused", "reason": verdict.reason})
+        return {"result": _refused_result(verdict), "context": None, "backend_selected": None,
+                "backend_effective": None, "backend_dialog": None, "trace": trace}
+
+    explicit_level = "explicit" if (verdict.is_explicit or verdict.wants_local_adult) else verdict.level
+
     context = build_context(home, character, request_text, budget)
     report({"stage": "context_compiled", "reference_count": len(context.get("references", []))})
     req = _request_from_context(
@@ -202,13 +259,19 @@ def plan_and_generate(
         out_dir=out_dir,
         operation=operation,
         repair_of=repair_of,
+        explicit=explicit_level,
     )
     probe, provider = safe_comfy_probe()
     _, profile = load_profile(home, character)
     preference = get_backend_preference(profile)
     dialog = backend_dialog(preference, probe)
 
-    if backend is None:
+    if req.explicit == "explicit":
+        report({"stage": "adult_routing",
+                "reason": "explicit adult synthetic content -> local ComfyUI LUSTIFY profile only",
+                "wants_local_adult": verdict.wants_local_adult})
+        mode = "comfyui"
+    elif backend is None:
         mode = _preference_mode(preference, dialog)
         if mode is None:
             report({"stage": "backend_choice_required", "preference": preference})
@@ -264,6 +327,12 @@ def plan_seed_generation(
         trace.append(dict(event))
         if progress is not None:
             progress(dict(event))
+
+    verdict = classify_explicitness(description)
+    if verdict.level == DISALLOWED:
+        report({"stage": "request_refused", "reason": verdict.reason})
+        return {"result": _refused_result(verdict), "context": None, "backend_selected": None,
+                "backend_effective": None, "backend_dialog": None, "trace": trace}
 
     _, profile = load_profile(home, character)
     req = _seed_request(profile["id"], description, budget=budget, seed=seed, out_dir=out_dir)

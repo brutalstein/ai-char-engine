@@ -45,6 +45,7 @@ A golden/trusted reference created by one engine can be used by the other. **Pro
 - recent-pose anti-repetition without resending old generations
 - provider-neutral trusted references usable by both image engines
 - local ComfyUI identity generation and optional no-reference character bootstrap
+- optional local-only explicit-adult profile (LUSTIFY SDXL v4 + IP-Adapter identity); explicit adult content never uses cloud generation
 - Codex built-in image generation without an AICE OpenAI API key
 - automatic capability-aware provider planning
 - explicit one-shot hybrid cooperation when requested
@@ -172,6 +173,16 @@ The current tuned 8 GB RTX 5070 Laptop identity profile uses:
 - one pinned custom-node family: ComfyUI-GGUF
 
 For users who explicitly want **local creation of the very first character**, v0.4 adds an optional Qwen-Image text-to-image GGUF bootstrap workflow. Its extra weights are not downloaded during ordinary local identity setup.
+
+### Local adult profile
+
+v0.5 adds an optional, local-only profile for explicit adult imagery of a fully adult synthetic or user-authorized character:
+
+- **LUSTIFY! SDXL v4.0** checkpoint with **IP-Adapter Plus SDXL (ViT-H)** identity from the character's own golden/trusted references
+- versioned `lustify_sdxl_adult` workflow, tuned for 8 GB (832×1216, `dpmpp_2m`/`karras`, 30 steps, CFG 5.0, batch 1, CPU VAE)
+- installed only on request: `aice comfy setup --capabilities adult_explicit` (~10.3 GB, outside Git)
+
+Explicit adult requests are routed here automatically and **never** to cloud image generation. If the profile is not installed, Codex says so and offers setup or a non-explicit alternative — it does not silently downgrade. Requests involving minors, incest, non-consent, sexual violence, real-person deepfakes, or hidden-camera scenarios are refused. Generated adult images follow the same trust rules as any other output — nothing is auto-promoted.
 
 Codex handles setup internally. The normal user never opens the ComfyUI browser UI.
 

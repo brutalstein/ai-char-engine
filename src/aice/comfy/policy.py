@@ -13,6 +13,51 @@ from .hardware import HardwareProfile
 QWEN_EDIT_2509_GGUF_Q4KS = "qwen_image_edit_2509_gguf_q4ks"
 QWEN_EDIT_2509_GGUF_Q3KM = "qwen_image_edit_2509_gguf_q3km"
 
+# --- explicit-adult profile: LUSTIFY! SDXL v4 -------------------------------
+# One fp16 SDXL checkpoint (no quant tiers). Identity is supplied by IP-Adapter
+# Plus (ViT-H) from 1-2 trusted references, so this path shares the same 8 GB
+# server flags as the Qwen path (--lowvram / --reserve-vram / --cpu-vae): the
+# checkpoint + CLIP-Vision + IP-Adapter fit only with sequential CPU offload and
+# a CPU VAE decode. Priorities: identity > photorealism > reliability > speed.
+LUSTIFY_SDXL_V4 = "lustify_sdxl_v4"
+
+# SDXL likes ~30 steps of a 2nd-order sampler; DPM++ 2M / Karras is the most
+# broadly reliable photoreal combination for this model family. CFG 5.0 sits in
+# the middle of LUSTIFY's recommended 3-7 band: enough prompt adherence without
+# the contrast/plastic look higher CFG gives on skin.
+SDXL_STEPS = 30
+SDXL_CFG = 5.0
+SDXL_SAMPLER_NAME = "dpmpp_2m"
+SDXL_SCHEDULER = "karras"
+
+# SDXL native buckets, every side a multiple of 64, each <= 1 MP so an 8 GB card
+# never has to tile. Portrait is the safe default for a single-subject photo.
+SDXL_BUCKETS: dict[str, tuple[int, int]] = {
+    "portrait": (832, 1216),
+    "square": (1024, 1024),
+    "full_body": (832, 1216),
+    "landscape": (1216, 832),
+}
+
+# A short, model-appropriate negative. SDXL does not need SD1.5-length lists; this
+# steers away from non-photographic renders, gross anatomy failures, and - as a
+# deliberate safety measure - youthful appearance.
+SDXL_NEGATIVE_BASELINE = (
+    "cartoon, anime, illustration, 3d render, cgi, painting, drawing, sketch, "
+    "deformed, disfigured, bad anatomy, extra limbs, extra fingers, fused fingers, "
+    "mutated hands, malformed, watermark, signature, text, logo, blurry, lowres, "
+    "low quality, jpeg artifacts, plastic skin, airbrushed, "
+    "child, childlike, teen, teenager, underage, shota, loli"
+)
+
+# IP-Adapter identity weight by scene. A tight portrait can carry a strong face
+# lock; a full-body / wide scene needs a lower weight so the model still owns
+# body proportions, wardrobe and environment.
+_IPADAPTER_WEIGHT = {"portrait": 0.75, "square": 0.72, "full_body": 0.55, "landscape": 0.55}
+# Practical default reference count for IP-Adapter identity: 1-2 images. More than
+# two dilutes the identity embedding rather than strengthening it.
+ADULT_MAX_REFERENCES = 2
+
 
 @dataclass(frozen=True)
 class ModelSamplerProfile:
@@ -181,4 +226,39 @@ def resolve_settings(
         batch_size=1,
         upscale=budget in profile.upscale_budgets,
         vram_flags=profile.server_args,
+    )
+
+
+def adult_ipadapter_weight(aspect: str, scene_tags: tuple[str, ...] = ()) -> float:
+    return _IPADAPTER_WEIGHT.get(_aspect_from_scene(aspect, scene_tags), 0.7)
+
+
+def resolve_adult_settings(
+    hw: HardwareProfile,
+    *,
+    aspect: str = "portrait",
+    scene_tags: tuple[str, ...] = (),
+    free_vram_mb: int | None = None,
+) -> EffectiveSettings:
+    """Deterministic LUSTIFY SDXL settings for the local explicit-adult profile.
+
+    One checkpoint, one sampler profile; the only scene-dependent knobs are the
+    resolution bucket and the IP-Adapter identity weight. Server flags come from
+    the shared hardware profile because the ComfyUI server is process-global.
+    """
+    profile = profile_for(hw)
+    w, h = SDXL_BUCKETS[_aspect_from_scene(aspect, scene_tags)]
+    w, h = _fit_pixels(w, h, min(profile.max_pixels, 1_048_576))
+    return EffectiveSettings(
+        model_id=LUSTIFY_SDXL_V4,
+        steps=SDXL_STEPS,
+        cfg=SDXL_CFG,
+        sampler=SDXL_SAMPLER_NAME,
+        scheduler=SDXL_SCHEDULER,
+        width=w,
+        height=h,
+        batch_size=1,
+        upscale=False,
+        vram_flags=profile.server_args,
+        ipadapter_weight=adult_ipadapter_weight(aspect, scene_tags),
     )

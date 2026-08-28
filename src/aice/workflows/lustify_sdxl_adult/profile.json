@@ -1,0 +1,34 @@
+{
+  "name": "lustify_sdxl_adult",
+  "version": "1.0.0",
+  "description": "LUSTIFY! SDXL v4 uncensored adult photoreal. Scene from the prompt; identity from 1-2 trusted AICE references via IP-Adapter Plus (ViT-H). DPM++ 2M / Karras, 30 steps, CFG 5, batch 1, SDXL ~1 MP buckets.",
+  "requires_references": true,
+  "adult_explicit": true,
+  "capability": "adult_explicit",
+  "required_class_types": [
+    "CheckpointLoaderSimple", "CLIPTextEncode", "EmptyLatentImage", "KSampler",
+    "VAEDecode", "SaveImage", "LoadImage", "ImageBatch",
+    "IPAdapterModelLoader", "CLIPVisionLoader", "IPAdapterAdvanced"
+  ],
+  "slots": {
+    "model_path":       {"node": "4",  "input": "ckpt_name"},
+    "positive_prompt":  {"node": "6",  "input": "text"},
+    "negative_prompt":  {"node": "7",  "input": "text"},
+    "width":            {"node": "5",  "input": "width"},
+    "height":           {"node": "5",  "input": "height"},
+    "seed":             {"node": "3",  "input": "seed"},
+    "steps":            {"node": "3",  "input": "steps"},
+    "cfg":              {"node": "3",  "input": "cfg"},
+    "sampler":          {"node": "3",  "input": "sampler_name"},
+    "scheduler":        {"node": "3",  "input": "scheduler"},
+    "ipadapter_weight": {"node": "32", "input": "weight"},
+    "ipadapter_file":   {"node": "30", "input": "ipadapter_file"},
+    "clip_vision_file": {"node": "31", "input": "clip_name"},
+    "output_prefix":    {"node": "9",  "input": "filename_prefix"}
+  },
+  "reference_slots": [
+    {"load": "10", "scale": "10", "enc_input": "image1"},
+    {"load": "11", "scale": "11", "enc_input": "image2"}
+  ],
+  "text_encoder_nodes": ["20"]
+}

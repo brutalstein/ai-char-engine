@@ -1,6 +1,6 @@
 {
   "name": "ai-char-engine",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Conversational evidence-grounded persistent character engine with capability-aware Codex and local ComfyUI image orchestration.",
   "author": {
     "name": "Cenker Usta",
@@ -9,7 +9,7 @@
   "homepage": "https://github.com/brutalstein/ai-char-engine",
   "repository": "https://github.com/brutalstein/ai-char-engine",
   "license": "MIT",
-  "keywords": ["codex", "image-generation", "comfyui", "character-consistency", "virtual-creator", "identity-memory", "hybrid-orchestration"],
+  "keywords": ["codex", "image-generation", "comfyui", "character-consistency", "virtual-creator", "identity-memory", "hybrid-orchestration", "adult-content"],
   "skills": "./.agents/skills/",
   "interface": {
     "displayName": "AI Character Engine",
@@ -24,6 +24,7 @@
       "I already have a character. Guide me through adding reference photos and make them usable by every supported image engine.",
       "Generate a new photo of my saved character and choose or combine the image engines intelligently when useful.",
       "Set up local ComfyUI image generation, including local character creation if I ask for it.",
+      "Set up the local adult model so explicit images of my adult character stay on my machine.",
       "Update this repository to the latest AI Character Engine plugin and register it for Codex automatically."
     ]
   }

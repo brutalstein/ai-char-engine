@@ -105,6 +105,8 @@ def extra_model_paths_yaml(models_dir: Path) -> str:
         "  vae: vae\n"
         "  loras: loras\n"
         "  upscale_models: upscale_models\n"
+        "  ipadapter: ipadapter\n"
+        "  clip_vision: clip_vision\n"
     )
 
 
@@ -219,7 +221,7 @@ class ComfyInstaller:
     def ensure_extra_model_paths(self) -> None:
         self.models_dir.mkdir(parents=True, exist_ok=True)
         for sub in ("diffusion_models", "unet", "text_encoders", "vae", "loras",
-                    "upscale_models", "checkpoints"):
+                    "upscale_models", "checkpoints", "ipadapter", "clip_vision"):
             (self.models_dir / sub).mkdir(exist_ok=True)
         (self.runtime_dir / "extra_model_paths.yaml").write_text(
             extra_model_paths_yaml(self.models_dir), encoding="utf-8"
