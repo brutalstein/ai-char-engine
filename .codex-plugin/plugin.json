@@ -23,7 +23,8 @@
       "Help me create a new persistent character from scratch.",
       "I already have a character. Guide me through adding reference photos.",
       "Generate a new photo of my saved character and ask which image backend I want when needed.",
-      "Set up local ComfyUI image generation for AI Character Engine."
+      "Set up local ComfyUI image generation for AI Character Engine.",
+      "Update this repository to the latest AI Character Engine plugin and register it for Codex automatically."
     ]
   }
 }
