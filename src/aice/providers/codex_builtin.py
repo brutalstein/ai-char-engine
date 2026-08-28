@@ -15,8 +15,10 @@ class CodexBuiltinProvider(ImageProvider):
 
     def generate(self, req: GenerationRequest, *, progress: ProgressCallback | None = None) -> GenerationResult:
         emit_progress(progress, "builtin_planned", backend=self.name)
-        refs = [str(p) for p in req.capped_references()]
-        metadata = req.capped_reference_metadata()
+        # The 3-reference cap belongs to the current local Qwen workflow, not to
+        # Codex built-in generation. Preserve the selector's full budget here.
+        refs = [str(p) for p in req.reference_paths]
+        metadata = req.capped_reference_metadata(limit=len(req.reference_paths))
         return GenerationResult(
             backend=self.name,
             output_path=None,
@@ -34,6 +36,6 @@ class CodexBuiltinProvider(ImageProvider):
                 "backend": self.name,
                 "reference_ids": [row["id"] for row in metadata],
                 "reference_roles": [row["role"] for row in metadata],
-                "reference_names": [p.name for p in req.capped_references()],
+                "reference_names": [p.name for p in req.reference_paths],
             },
         )
