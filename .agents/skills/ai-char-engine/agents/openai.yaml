@@ -1,0 +1,6 @@
+interface:
+  display_name: "AI Character Engine"
+  short_description: "Persistent character creation and image generation"
+  default_prompt: "Use AI Character Engine to guide me conversationally, preserve my character identity, and generate the image I describe."
+policy:
+  allow_implicit_invocation: true

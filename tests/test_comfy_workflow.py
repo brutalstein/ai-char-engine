@@ -46,7 +46,9 @@ class RegistryTests(unittest.TestCase):
 
     def test_comfyui_and_torch_pins(self) -> None:
         reg = load_registry()
-        self.assertEqual(reg["comfyui"]["min_version"], "0.3.60")
+        self.assertEqual(reg["comfyui"]["version"], "0.34.0")
+        self.assertEqual(reg["comfyui"]["pin"], "12d5279438bfefc058a269eae805ceab6047777f")
+        self.assertEqual(reg["custom_nodes"][0]["pin"], "6ea2651e7df66d7585f6ffee804b20e92fb38b8a")
         self.assertEqual(reg["torch"]["index_url"], "https://download.pytorch.org/whl/cu130")
 
 

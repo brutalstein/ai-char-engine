@@ -1,21 +1,24 @@
 from __future__ import annotations
 
-from .base import GenerationRequest, GenerationResult, ImageProvider
+from .base import GenerationRequest, GenerationResult, ImageProvider, ProgressCallback, emit_progress
 
 
 class CodexBuiltinProvider(ImageProvider):
-    """The original path: Codex reads the compiled prompt + selected references and
-    calls its built-in ``image_gen``. This provider only packages the request; it
-    never touches pixels itself, so behaviour is identical to v0.2.0.
+    """Codex reads the compiled prompt + selected references and calls its built-in
+    ``image_gen``. This provider packages the request; it never touches pixels itself.
     """
 
     name = "codex_builtin"
 
     def available(self) -> tuple[bool, str]:
-        return True, "Codex built-in image_gen is always available"
+        return True, "Codex built-in image_gen is available in the Codex host"
 
-    def generate(self, req: GenerationRequest) -> GenerationResult:
+    def generate(self, req: GenerationRequest, *, progress: ProgressCallback | None = None) -> GenerationResult:
+        emit_progress(progress, "builtin_planned", backend=self.name)
+        # The 3-reference cap belongs to the current local Qwen workflow, not to
+        # Codex built-in generation. Preserve the selector's full budget here.
         refs = [str(p) for p in req.reference_paths]
+        metadata = req.capped_reference_metadata(limit=len(req.reference_paths))
         return GenerationResult(
             backend=self.name,
             output_path=None,
@@ -31,6 +34,8 @@ class CodexBuiltinProvider(ImageProvider):
             },
             reproducibility={
                 "backend": self.name,
+                "reference_ids": [row["id"] for row in metadata],
+                "reference_roles": [row["role"] for row in metadata],
                 "reference_names": [p.name for p in req.reference_paths],
             },
         )

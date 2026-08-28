@@ -1,23 +1,30 @@
 {
   "name": "ai-char-engine",
-  "version": "0.2.0",
-  "description": "Interactive evidence-grounded persistent character engine for Codex image generation.",
+  "version": "0.3.0",
+  "description": "Interactive evidence-grounded persistent character engine for Codex image generation with optional local ComfyUI.",
+  "author": {
+    "name": "Cenker Usta",
+    "url": "https://github.com/brutalstein"
+  },
+  "homepage": "https://github.com/brutalstein/ai-char-engine",
   "repository": "https://github.com/brutalstein/ai-char-engine",
   "license": "MIT",
-  "keywords": ["codex", "imagegen", "character-consistency", "virtual-creator", "identity-memory"],
+  "keywords": ["codex", "image-generation", "comfyui", "character-consistency", "virtual-creator", "identity-memory"],
   "skills": "./.agents/skills/",
   "interface": {
     "displayName": "AI Character Engine",
-    "shortDescription": "Build and keep one visual character consistent.",
-    "longDescription": "An interactive Codex workflow that guides non-technical users from a new character or unlimited reference photos, builds an evidence-grounded identity brain with provenance and conflict handling, expands trusted views lazily, and generates consistent photorealistic images with bounded context and repair cost.",
+    "shortDescription": "Create and keep one visual character consistent.",
+    "longDescription": "A conversational Codex workflow that guides non-technical users from a new character or unlimited reference photos, builds an evidence-grounded identity brain, lets the user choose local ComfyUI, Codex image generation, or automatic routing, and produces consistent photorealistic images with bounded context and repair cost.",
     "developerName": "Cenker Usta",
     "category": "Productivity",
-    "capabilities": ["Interactive", "Write"],
+    "capabilities": ["Read", "Write"],
     "websiteURL": "https://github.com/brutalstein/ai-char-engine",
     "defaultPrompt": [
-      "Help me create a new character from scratch.",
-      "I already have a character. Guide me through references.",
-      "Generate a new photo of my saved character."
+      "Help me create a new persistent character from scratch.",
+      "I already have a character. Guide me through adding reference photos.",
+      "Generate a new photo of my saved character and ask which image backend I want when needed.",
+      "Set up local ComfyUI image generation for AI Character Engine.",
+      "Update this repository to the latest AI Character Engine plugin and register it for Codex automatically."
     ]
   }
 }

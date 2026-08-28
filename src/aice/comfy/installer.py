@@ -16,7 +16,8 @@ from . import policy as policymod
 
 Progress = Callable[[str], None]
 
-# Refuse to start a fresh install below this much free space (models + torch + headroom).
+# Refuse to start a fresh install below this much free space (models + torch +
+# temporary download/cache headroom). Model registry bytes are checked separately.
 MIN_FREE_GB_FRESH = 40
 _WINDOWS = os.name == "nt"
 
@@ -55,6 +56,38 @@ def _git_sha(repo: Path) -> str:
         return _run(["git", "-C", str(repo), "rev-parse", "HEAD"]).strip()
     except InstallError:
         return ""
+
+
+def _ensure_pinned_repo(
+    url: str,
+    target: Path,
+    pin: str,
+    *,
+    log: Progress | None = None,
+) -> str:
+    """Ensure ``target`` is an exact detached checkout of ``pin``.
+
+    Fresh and repeated installs therefore use the same tested runtime rather than
+    whatever upstream branch head happens to exist that day. Existing exact
+    checkouts are true no-ops and require no network access.
+    """
+    target = target.resolve()
+    if target.exists() and not (target / ".git").exists():
+        raise InstallError(f"refusing to overwrite non-git directory: {target}")
+    if not target.exists():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _run(["git", "clone", "--filter=blob:none", "--no-checkout", url, str(target)], log=log)
+
+    current = _git_sha(target)
+    if current == pin:
+        return current
+
+    _run(["git", "-C", str(target), "fetch", "--depth", "1", "origin", pin], log=log)
+    _run(["git", "-C", str(target), "checkout", "--detach", "FETCH_HEAD"], log=log)
+    current = _git_sha(target)
+    if current != pin:
+        raise InstallError(f"repository pin mismatch for {target.name}: expected {pin}, got {current or 'unknown'}")
+    return current
 
 
 def _venv_base_python() -> list[str]:
@@ -111,6 +144,8 @@ class ComfyInstaller:
     def preflight(self) -> dict[str, Any]:
         fresh = not (self.runtime_dir / "main.py").exists()
         free_gb = round(modelmod.free_disk_bytes(self.home) / 1e9, 1)
+        # Required models + an 8 GB temporary/cache allowance. The fresh-install
+        # floor is intentionally larger to cover wheel extraction and partial files.
         need_gb = round((modelmod.required_bytes(self.registry) + 8e9) / 1e9, 1)
         report = {
             "fresh_install": fresh,
@@ -123,17 +158,14 @@ class ComfyInstaller:
             raise InstallError("git is required on PATH")
         if fresh and free_gb < max(MIN_FREE_GB_FRESH, need_gb + 5):
             raise InstallError(
-                f"insufficient disk: {free_gb} GB free, need ~{need_gb + 5} GB. "
-                "Free space or set AICE_COMFY_HOME to another drive."
+                f"insufficient disk: {free_gb} GB free, need ~{max(MIN_FREE_GB_FRESH, need_gb + 5)} GB "
+                "including temporary headroom. Free space or set AICE_COMFY_HOME to another drive."
             )
         return report
 
     def ensure_comfyui(self, log: Progress | None = None) -> str:
-        if not (self.runtime_dir / "main.py").exists():
-            self.runtime_dir.parent.mkdir(parents=True, exist_ok=True)
-            _run(["git", "clone", "--depth", "1", self.registry["comfyui"]["repo"],
-                  str(self.runtime_dir)], log=log)
-        return _git_sha(self.runtime_dir)
+        spec = self.registry["comfyui"]
+        return _ensure_pinned_repo(spec["repo"], self.runtime_dir, spec["pin"], log=log)
 
     def ensure_venv(self, log: Progress | None = None) -> None:
         if self.venv_python.exists():
@@ -172,12 +204,11 @@ class ComfyInstaller:
         nodes_dir.mkdir(parents=True, exist_ok=True)
         for node in self.registry.get("custom_nodes", []):
             target = nodes_dir / node["name"]
-            if not target.exists():
-                _run(["git", "clone", "--depth", "1", node["repo"], str(target)], log=log)
+            sha = _ensure_pinned_repo(node["repo"], target, node["pin"], log=log)
             req = target / "requirements.txt"
             if req.exists():
                 self._pip("install", "-r", str(req), log=log)
-            out.append({"name": node["name"], "sha": _git_sha(target)})
+            out.append({"name": node["name"], "sha": sha})
         return out
 
     def ensure_extra_model_paths(self) -> None:
@@ -207,6 +238,10 @@ class ComfyInstaller:
     # -- orchestration -------------------------------------------
     def setup(self, *, model_keys: list[str] | None = None, log: Progress | None = None,
               model_progress: Callable[[str, int, int], None] | None = None) -> dict[str, Any]:
+        # Capture validation identity from THIS installer config before mutating it.
+        # Using cfgmod.load_config() here would make tests/custom homes accidentally
+        # compare against unrelated global user state.
+        old_pins = dict(self.cfg.get("pins", {}))
         pre = self.preflight()
         comfy_sha = self.ensure_comfyui(log)
         self.ensure_venv(log)
@@ -216,7 +251,7 @@ class ComfyInstaller:
         self.ensure_extra_model_paths()
 
         profile_name = policymod.classify(hw.load_cached() or hw.detect())
-        if model_keys is None:  # required stack + whatever this machine's profile runs
+        if model_keys is None:
             prof = policymod.PROFILES[profile_name]
             specs = modelmod.model_specs(self.registry)
             model_keys = list(dict.fromkeys(
@@ -225,19 +260,26 @@ class ComfyInstaller:
             ))
         fetched = self.ensure_models(model_keys, progress=model_progress)
 
-        self.cfg["pins"] = {
+        new_pins = {
             "comfyui_sha": comfy_sha,
+            "comfyui_version": self.registry["comfyui"].get("version", ""),
             "custom_nodes": nodes,
             "torch": torch.get("v", ""),
             "torch_cuda": torch.get("cuda", ""),
         }
+        self.cfg["pins"] = new_pins
         self.cfg["profile"] = profile_name
+        # Any changed runtime identity requires a fresh smoke test before auto-routing.
+        if old_pins and old_pins != new_pins:
+            self.cfg["validated"] = False
         cfgmod.save_config(self.cfg)
         return {
             "preflight": pre,
             "comfyui_sha": comfy_sha,
+            "comfyui_version": self.registry["comfyui"].get("version", ""),
             "torch": torch,
             "custom_nodes": nodes,
             "models_fetched": fetched,
             "profile": self.cfg["profile"],
+            "validated": bool(self.cfg.get("validated")),
         }

@@ -1,0 +1,21 @@
+{
+  "name": "ai-char-engine",
+  "interface": {
+    "displayName": "AI Character Engine"
+  },
+  "plugins": [
+    {
+      "name": "ai-char-engine",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/brutalstein/ai-char-engine.git",
+        "ref": "main"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

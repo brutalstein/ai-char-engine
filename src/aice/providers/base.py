@@ -3,12 +3,19 @@ from __future__ import annotations
 import abc
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 # The model-native hard cap on identity reference images (Qwen-Image-Edit-2509 takes
 # image1/image2/image3). Budget caps (economy=2, balanced=3, quality=4) are applied
 # upstream in selector.py; a provider still clamps to what its backend accepts.
 MAX_PROVIDER_REFERENCES = 3
+ProgressCallback = Callable[[dict[str, Any]], None]
+
+
+def emit_progress(callback: ProgressCallback | None, stage: str, **details: Any) -> None:
+    """Emit a factual coarse-grained generation event; never invent percentages."""
+    if callback is not None:
+        callback({"stage": stage, **details})
 
 
 @dataclass(frozen=True)
@@ -17,12 +24,16 @@ class GenerationRequest:
 
     Everything identity-related is already resolved: ``prompt`` is the compiled
     generation contract (see engine.render_generation_prompt) and ``reference_paths``
-    are already-selected golden/trusted images.
+    are already-selected golden/trusted images. Parallel reference metadata preserves
+    AICE provenance without making providers responsible for trust decisions.
     """
 
     character: str
     prompt: str
     reference_paths: tuple[Path, ...] = ()
+    reference_ids: tuple[str, ...] = ()
+    reference_roles: tuple[str, ...] = ()
+    reference_tiers: tuple[str, ...] = ()
     visible_permanent_details: tuple[str, ...] = ()
     scene_tags: tuple[str, ...] = ()
     aspect: str = "portrait"  # portrait | square | full_body
@@ -34,6 +45,18 @@ class GenerationRequest:
 
     def capped_references(self, limit: int = MAX_PROVIDER_REFERENCES) -> tuple[Path, ...]:
         return tuple(self.reference_paths[:limit])
+
+    def capped_reference_metadata(self, limit: int = MAX_PROVIDER_REFERENCES) -> list[dict[str, str]]:
+        paths = self.capped_references(limit)
+        rows: list[dict[str, str]] = []
+        for index, path in enumerate(paths):
+            rows.append({
+                "id": self.reference_ids[index] if index < len(self.reference_ids) else path.name,
+                "role": self.reference_roles[index] if index < len(self.reference_roles) else "",
+                "tier": self.reference_tiers[index] if index < len(self.reference_tiers) else "",
+                "path": str(path),
+            })
+        return rows
 
 
 @dataclass(frozen=True)
@@ -110,4 +133,4 @@ class ImageProvider(abc.ABC):
         """(usable_now, human-readable reason)."""
 
     @abc.abstractmethod
-    def generate(self, req: GenerationRequest) -> GenerationResult: ...
+    def generate(self, req: GenerationRequest, *, progress: ProgressCallback | None = None) -> GenerationResult: ...
