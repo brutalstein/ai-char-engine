@@ -1,30 +1,26 @@
 """Compact, deterministic explicit-intent classification.
 
-This is intentionally *not* an NLP subsystem. It is a small keyword/phrase matcher
+This is intentionally *not* an NLP subsystem. It is a small, auditable phrase matcher
 that sorts an image request into four buckets so the provider planner can route it:
 
 - ``normal``      -> ordinary photoreal request; normal routing applies.
 - ``suggestive``  -> sensual but not explicit; normal routing applies.
-- ``explicit``    -> explicit adult synthetic content; must use the local ComfyUI
-                     adult profile (LUSTIFY), never built-in cloud image generation.
-- ``disallowed``  -> sexual content the project must refuse (minors, incest,
-                     non-consent, sexual violence, real-person sexual deepfakes,
-                     hidden-camera/voyeur, or otherwise illegal).
+- ``explicit``    -> explicit adult synthetic content; local adult ComfyUI only.
+- ``disallowed``  -> content this project must refuse before any provider is touched.
 
-The whole engine is already restricted to adult synthetic/authorized characters
-(``storage.save_profile``), so "adult" is the baseline. This layer only decides
-*explicitness* and *hard refusal*.
+Matching is Unicode/accent-insensitive so the deterministic safety/routing layer works
+for the Turkish/English conversational UX instead of relying on Codex to translate it.
 """
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 
 NORMAL = "normal"
 SUGGESTIVE = "suggestive"
 EXPLICIT = "explicit"
 DISALLOWED = "disallowed"
-
 LEVELS = (NORMAL, SUGGESTIVE, EXPLICIT, DISALLOWED)
 
 
@@ -54,7 +50,6 @@ class IntentVerdict:
 
 # --- vocabularies (data, not logic) -----------------------------------------
 
-# Hard refusals. Matched as whole words / phrases, case-insensitive.
 _MINORS = (
     "child", "children", "childlike", "kid", "kids", "toddler", "infant", "baby",
     "minor", "underage", "under-age", "under age", "preteen", "pre-teen",
@@ -62,14 +57,19 @@ _MINORS = (
     "jailbait", "schoolgirl", "schoolboy", "school girl", "school boy",
     "grade schooler", "elementary school", "middle school", "little girl",
     "little boy", "young girl", "young boy", "underaged",
+    # Turkish (folded during matching).
+    "çocuk", "çocukça", "reşit olmayan", "reşit değil", "küçük kız", "küçük erkek",
+    "ilkokullu", "ortaokullu", "liseli", "ergen çocuk",
 )
-_INCEST = ("incest", "incestuous")
+_INCEST = ("incest", "incestuous", "ensest")
 _FAMILY = (
     "sister", "brother", "mother", "father", "mom", "mommy", "dad", "daddy",
     "daughter", "son", "aunt", "uncle", "niece", "nephew", "cousin", "sibling",
     "stepsister", "step-sister", "step sister", "stepbrother", "step brother",
     "stepmom", "step mom", "stepmother", "stepdad", "step dad", "stepfather",
     "stepdaughter", "step daughter", "stepson", "step son",
+    "kız kardeş", "erkek kardeş", "anne", "baba", "kızım", "oğlum", "teyze", "hala",
+    "amca", "dayı", "kuzen", "üvey kız kardeş", "üvey erkek kardeş", "üvey anne", "üvey baba",
 )
 _NONCONSENT = (
     "rape", "raping", "raped", "noncon", "non-con", "non con", "nonconsensual",
@@ -78,27 +78,27 @@ _NONCONSENT = (
     "molest", "molestation", "drugged", "roofied", "date rape",
     "unconscious", "passed out", "while she sleeps", "while he sleeps",
     "coerced", "coercion",
+    "tecavüz", "rızasız", "rıza olmadan", "zorla seks", "zorla cinsel", "baygınken",
+    "uyurken seks", "uyuşturulmuş", "ilaçla bayıltılmış",
 )
 _SEXUAL_VIOLENCE = (
     "sexual assault", "sexual violence", "snuff", "gore porn", "torture porn",
-    "beaten and", "abuse porn",
+    "beaten and", "abuse porn", "cinsel saldırı", "cinsel şiddet", "işkence pornosu",
 )
 _DEEPFAKE = (
     "deepfake", "deep fake", "deep-fake", "face swap", "face-swap", "faceswap",
     "nudify", "undress photo", "undress this", "real person", "celebrity nude",
-    "actress nude", "actor nude",
+    "actress nude", "actor nude", "gerçek kişi", "gerçek insan", "ünlü çıplak",
+    "ünlüyü çıplak", "yüz değiştir", "yüzünü koy",
 )
 _VOYEUR = (
     "hidden camera", "hidden cam", "spycam", "spy cam", "voyeur", "voyeuristic",
     "peeping", "peeping tom", "upskirt", "creepshot", "creep shot",
     "secretly filmed", "secretly recorded", "changing room", "locker room",
-    "public restroom", "bathroom spy",
-)
-_AGE_RE = re.compile(
-    r"\b(?:[0-9]|1[0-7])\s*(?:years?[\s-]*old|y(?:[\s-]*o)?[\s-]*(?:girl|boy|female|male)?)\b"
+    "public restroom", "bathroom spy", "gizli kamera", "habersiz çekim", "habersiz çekilmiş",
+    "soyunma odası gizli", "tuvalet gizli kamera", "röntgenci",
 )
 
-# Explicit adult synthetic content.
 _EXPLICIT = (
     "nsfw", "18+", "+18", "explicit", "explicit photo", "explicit content",
     "explicit image", "sexually explicit", "nude", "nudes", "nudity", "naked",
@@ -115,19 +115,25 @@ _EXPLICIT = (
     "adult version", "make it explicit", "make it nsfw", "make it 18+",
     "make it +18", "nsfw version", "more explicit", "uncensored nude",
     "uncensored version", "sex tape",
+    # Turkish.
+    "çıplak", "tamamen çıplak", "çıplaklık", "üstsüz", "alttan çıplak", "tam frontal",
+    "seks", "seks sahnesi", "cinsel ilişki", "cinsel birleşme", "penetrasyon",
+    "oral seks", "mastürbasyon", "mastürbasyon yap", "orgazm", "porno", "pornografik",
+    "hardcore", "vajina", "vulva", "penis", "genital", "meme ucu", "meme uçları",
+    "bacaklarını aç", "+18 versiyon", "18+ versiyon", "yetişkin versiyon", "nsfw yap",
+    "daha açık yap", "sansürsüz çıplak", "çıplak fotoğraf",
 )
 
-# Suggestive but not explicit.
 _SUGGESTIVE = (
     "lingerie", "underwear", "bra and panties", "panties", "thong", "negligee",
     "bikini", "swimsuit", "one-piece swimsuit", "micro bikini", "cleavage",
     "sensual", "seductive", "suggestive", "provocative", "see-through",
     "see through", "sheer top", "sheer dress", "wet t-shirt", "boudoir",
     "implied nude", "covered nude", "pin-up", "pinup", "sexy pose", "risque",
-    "revealing outfit", "skimpy",
+    "revealing outfit", "skimpy", "iç çamaşırı", "sütyen", "külot", "tanga", "bikini",
+    "dekolte", "baştan çıkarıcı", "seksi poz", "transparan elbise", "transparan üst",
 )
 
-# Signals that the user specifically wants the local adult backend for this request.
 _WANTS_LOCAL_ADULT = (
     "local adult model", "local adult backend", "local adult engine",
     "use the local adult", "use local adult", "use lustify", "lustify",
@@ -135,23 +141,45 @@ _WANTS_LOCAL_ADULT = (
     "do not use the built-in", "not the built-in", "not the built in",
     "no built-in generator", "not built-in generation", "use comfyui for this",
     "use the local model for this", "local model for this one",
+    "yerel yetişkin model", "yerel +18 model", "yerel nsfw", "lustify kullan",
+    "comfyui ile bunu yap", "comfy ile bunu yap", "image gen kullanma", "imagegen kullanma",
+    "built-in kullanma", "bulut modelini kullanma", "yerel modeli kullan",
 )
 
 
+def _fold(value: str) -> str:
+    # Turkish dotless-i does not decompose under NFKD; map it explicitly.
+    value = str(value or "").casefold().replace("ı", "i")
+    value = unicodedata.normalize("NFKD", value)
+    value = "".join(ch for ch in value if not unicodedata.combining(ch))
+    return " ".join(value.split())
+
+
 def _norm(text: str) -> str:
-    return " " + " ".join(str(text or "").casefold().split()) + " "
+    return " " + _fold(text) + " "
 
 
 def _hits(haystack: str, needles: tuple[str, ...]) -> list[str]:
     out: list[str] = []
-    for term in needles:
-        pattern = term.casefold()
-        if " " in pattern or "-" in pattern or "+" in pattern:
-            if pattern in haystack:
-                out.append(term)
-        elif re.search(r"(?<![a-z])" + re.escape(pattern) + r"(?![a-z])", haystack):
-            out.append(term)
+    for original in needles:
+        term = _fold(original)
+        if not term:
+            continue
+        if " " in term or "-" in term or "+" in term:
+            if term in haystack:
+                out.append(original)
+        elif re.search(r"(?<![a-z0-9])" + re.escape(term) + r"(?![a-z0-9])", haystack):
+            out.append(original)
     return out
+
+
+def _underage_age_hit(text: str) -> bool:
+    # English: 15 yo / 15 years old. Turkish after folding: 15 yas / yasinda.
+    patterns = (
+        r"\b(?:[0-9]|1[0-7])\s*(?:years?[\s-]*old|y(?:[\s-]*o)?(?:[\s-]*(?:girl|boy|female|male))?)\b",
+        r"\b(?:[0-9]|1[0-7])\s*(?:yasinda|yas)\b",
+    )
+    return any(re.search(pattern, text) for pattern in patterns)
 
 
 def classify_explicitness(text: str) -> IntentVerdict:
@@ -159,18 +187,15 @@ def classify_explicitness(text: str) -> IntentVerdict:
     t = _norm(text)
 
     explicit_hits = _hits(t, _EXPLICIT)
-    age_hit = bool(_AGE_RE.search(t))
-
     disallowed: list[str] = []
     disallowed += _hits(t, _MINORS)
-    if age_hit:
+    if _underage_age_hit(t):
         disallowed.append("under-18 age reference")
     disallowed += _hits(t, _INCEST)
     disallowed += _hits(t, _NONCONSENT)
     disallowed += _hits(t, _SEXUAL_VIOLENCE)
     disallowed += _hits(t, _DEEPFAKE)
     disallowed += _hits(t, _VOYEUR)
-    # Family role + explicit sexual context -> incest-adjacent, refuse.
     family_hits = _hits(t, _FAMILY)
     if family_hits and explicit_hits:
         disallowed += [f"family term '{h}' with explicit context" for h in family_hits]
@@ -184,7 +209,6 @@ def classify_explicitness(text: str) -> IntentVerdict:
             wants_local,
             "request matches a category the project does not generate",
         )
-
     if explicit_hits:
         return IntentVerdict(
             EXPLICIT, tuple(dict.fromkeys(explicit_hits)), wants_local,
@@ -197,7 +221,6 @@ def classify_explicitness(text: str) -> IntentVerdict:
             SUGGESTIVE, tuple(dict.fromkeys(suggestive_hits)), wants_local,
             "suggestive but not explicit",
         )
-
     return IntentVerdict(NORMAL, (), wants_local, "no explicit-adult signal")
 
 
@@ -206,13 +229,16 @@ def demo() -> None:
     assert classify_explicitness("her in a bikini on the beach").level == SUGGESTIVE
     assert classify_explicitness("make it an explicit nude photo").level == EXPLICIT
     assert classify_explicitness("+18 version of the last shot").level == EXPLICIT
+    assert classify_explicitness("karakteri tamamen çıplak yap").level == EXPLICIT
     assert classify_explicitness("use the local adult model, no built-in generator").wants_local_adult
+    assert classify_explicitness("LUSTIFY kullan, image gen kullanma").wants_local_adult
     assert classify_explicitness("explicit photo of a schoolgirl").level == DISALLOWED
     assert classify_explicitness("nude 15 yo girl").level == DISALLOWED
+    assert classify_explicitness("15 yaşında çıplak fotoğraf").level == DISALLOWED
     assert classify_explicitness("explicit scene with her step sister").level == DISALLOWED
     assert classify_explicitness("hidden camera nude in a locker room").level == DISALLOWED
     assert classify_explicitness("deepfake nude of a real person").level == DISALLOWED
-    assert classify_explicitness("a young adult woman, 25, business portrait").level == NORMAL
+    assert classify_explicitness("25 yaşında yetişkin kadın, doğal iş portresi").level == NORMAL
     print("intent.demo ok")
 
 
