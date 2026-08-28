@@ -111,10 +111,14 @@ class ComfyClient:
             info = json.loads(raw)
         except json.JSONDecodeError:
             raise ComfyError("upload/image returned non-JSON") from None
+        name = info.get("name") or path.name
+        sub = info.get("subfolder", subfolder)
         return {
-            "name": info.get("name") or path.name,
-            "subfolder": info.get("subfolder", subfolder),
+            "name": name,
+            "subfolder": sub,
             "type": "input",
+            # value a LoadImage node expects: subfolder-qualified when in a subfolder
+            "ref": f"{sub}/{name}" if sub else name,
         }
 
     def submit(self, workflow: dict[str, Any]) -> str:

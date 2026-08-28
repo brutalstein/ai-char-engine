@@ -113,7 +113,7 @@ class ComfyUIProvider(ImageProvider):
         if not modelmod.verify(model_dest, spec)[0]:
             raise WorkflowError(f"model {settings.model_id} not installed ({spec.filename})")
 
-        uploaded = [client.upload_image(Path(p))["name"] for p in refs]
+        uploaded = [client.upload_image(Path(p))["ref"] for p in refs]
         seed = req.seed if req.seed is not None else random.randint(1, 2**31 - 1)
 
         graph = self.workflow.render(

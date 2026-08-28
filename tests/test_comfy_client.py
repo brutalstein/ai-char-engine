@@ -138,6 +138,7 @@ class ClientTests(unittest.TestCase):
             info = self.c.upload_image(p)
         self.assertEqual(info["name"], "ref.png")
         self.assertEqual(info["type"], "input")
+        self.assertEqual(info["ref"], "aice/ref.png")  # subfolder-qualified for LoadImage
         self.assertIn("ref.png", self.srv.uploaded)
 
     def test_free_is_best_effort(self) -> None:
