@@ -10,6 +10,7 @@ from .utils import atomic_write_json, read_json, sha256_file, slugify, utc_now
 SCHEMA_VERSION = 2
 REFERENCE_TIERS = {"golden", "trusted", "candidate", "rejected"}
 TRUSTED_TIERS = {"golden", "trusted"}
+REFERENCE_ORIGINS = {"user", "codex_builtin", "comfyui", "unknown"}
 BACKEND_PREFERENCES = {"unset", "auto", "comfyui", "codex_builtin", "ask_each_time"}
 
 
@@ -99,11 +100,7 @@ def create_character(home: Path, display_name: str, *, origin: str = "unknown") 
             "Preserve grounded permanent features only when their body region is visible.",
         ],
     }
-    brain = {
-        "schema_version": SCHEMA_VERSION,
-        "facts": {},
-        "updated_at": utc_now(),
-    }
+    brain = {"schema_version": SCHEMA_VERSION, "facts": {}, "updated_at": utc_now()}
     manifest = {"schema_version": SCHEMA_VERSION, "references": []}
     onboarding = {
         "schema_version": SCHEMA_VERSION,
@@ -242,6 +239,17 @@ def _record_by_id(manifest: dict[str, Any], ref_id: str) -> dict[str, Any]:
     return record
 
 
+def _reference_origin(source: str, origin_provider: str | None) -> str:
+    origin = str(origin_provider or "").strip().casefold()
+    if not origin:
+        origin = "user" if source == "user_uploaded" else "unknown"
+    if origin not in REFERENCE_ORIGINS:
+        raise ValueError(f"origin_provider must be one of: {', '.join(sorted(REFERENCE_ORIGINS))}")
+    if source == "user_uploaded" and origin not in {"user", "unknown"}:
+        raise ValueError("user_uploaded references cannot claim a generation provider")
+    return origin
+
+
 def register_reference(
     char_dir: Path,
     source_path: Path,
@@ -253,6 +261,7 @@ def register_reference(
     parent_ids: list[str] | None = None,
     notes: str = "",
     user_approved: bool = False,
+    origin_provider: str | None = None,
 ) -> dict[str, Any]:
     source_path = source_path.expanduser().resolve()
     if not source_path.is_file():
@@ -261,11 +270,14 @@ def register_reference(
         raise ValueError("source must be user_uploaded, generated, or generated_approved")
     if tier not in REFERENCE_TIERS:
         raise ValueError("invalid reference tier")
+    origin = _reference_origin(source, origin_provider)
     if source == "generated" and tier != "candidate":
         raise ValueError("Generated references must enter as candidate and pass the quality gate")
     if source == "generated_approved":
         if tier != "golden" or not user_approved or slugify(role) != "seed":
             raise ValueError("generated_approved is reserved for an explicitly approved initial seed")
+        if origin not in {"codex_builtin", "comfyui", "unknown"}:
+            raise ValueError("approved generated seeds must record a generation-provider origin")
     parent_ids = parent_ids or []
     manifest = load_manifest(char_dir)
     if source == "generated":
@@ -279,6 +291,10 @@ def register_reference(
     digest = sha256_file(source_path)
     existing = next((r for r in manifest["references"] if r.get("sha256") == digest), None)
     if existing:
+        # Backfill provenance for old manifests when the same bytes are re-registered.
+        if not existing.get("origin_provider") and origin != "unknown":
+            existing["origin_provider"] = origin
+            save_manifest(char_dir, manifest)
         return existing
     safe_role = slugify(role)
     ref_id = f"{safe_role}-{digest[:12]}"
@@ -292,6 +308,7 @@ def register_reference(
         "id": ref_id,
         "role": safe_role,
         "source": source,
+        "origin_provider": origin,
         "tier": tier,
         "trust": trust,
         "tags": sorted({str(x).strip() for x in (tags or []) if str(x).strip()}),
