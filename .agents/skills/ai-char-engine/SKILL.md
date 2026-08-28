@@ -68,7 +68,7 @@ Map natural replies:
 
 Persist only when the user clearly chooses a future/default behavior. A current-request provider name is a one-shot override.
 
-`auto` means intelligent planning, not double-generation. Natural one-shot phrases such as “use both if useful”, “Comfy first but let ImageGen help if needed”, or “hybrid for this one” map to `--backend hybrid`. Read `references/hybrid.md` only when cross-provider planning/repair/expansion is actually relevant.
+`auto` means intelligent planning, not double-generation. Natural one-shot phrases such as “use both if useful” or “hybrid for this one” map to `--backend hybrid`. Read `references/hybrid.md` only when cross-provider planning/repair/expansion is actually relevant.
 
 ### `backend_attention`
 Saved local preference is unavailable. Offer setup/repair or ask permission to use built-in for this request. Never silently leave an explicit/saved local choice. Read `references/comfyui.md` for local setup/recovery.
@@ -85,6 +85,10 @@ Read `references/onboarding.md` only during onboarding.
 3. deterministic backend/guide state.
 
 Explicit `comfyui` never silently falls back. Explicit `codex_builtin` never starts ComfyUI. `auto` or one-shot `hybrid` may use a bounded alternate-provider fallback/follow-up only when the plan allows it.
+
+## Explicit adult content
+
+`aice generate` classifies explicitness itself; route on its result. Explicit adult synthetic requests use only the local ComfyUI adult profile (LUSTIFY SDXL) — never built-in generation, no silent downgrade. Status `local_adult_unavailable`: say it is not ready, offer setup or a non-explicit alternative, stop. Status `refused`: a disallowed category — relay it, do not retry. See `references/adult.md`.
 
 ## Normal generation
 

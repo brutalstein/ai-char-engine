@@ -10,7 +10,7 @@ Treat natural-language requests such as **"install/setup this repo"**, **"update
 2. Normal install from the open checkout: `python scripts/install.py`.
 3. If the user says latest/current/güncel/newest/refresh/update: `python scripts/install.py --latest`. This installs a clean shallow latest-`main` checkout without rewriting the user's worktree and replaces the existing personal plugin registration in place.
 4. Run `aice doctor`, plugin validation, and the unit suite against the installed/current plugin. Verify the version before reporting success.
-5. Local ComfyUI is optional. Follow `references/comfyui.md`; only advertise capabilities that are actually installed and validated. The optional no-reference bootstrap models are installed only when local character creation is requested.
+5. Local ComfyUI is optional. Follow `references/comfyui.md`; only advertise capabilities that are actually installed and validated. The optional no-reference bootstrap models and the optional `adult_explicit` model stack (see `references/adult.md`) are installed only when the user asks for local character creation or the local adult model.
 6. Mention restart/refresh only if Codex discovery needs it.
 7. Never discard uncommitted user changes to refresh the plugin.
 8. Ask the user for manual terminal action only for a genuine external blocker such as auth/elevation/restart.
@@ -51,6 +51,7 @@ Rules:
 - `auto` chooses the strongest viable primary provider and may authorize one cross-provider repair/reference-expansion stage after validation; it must not double-generate by default;
 - explicit/saved `comfyui` never silently falls back;
 - explicit/saved `codex_builtin` never starts ComfyUI;
+- explicit adult synthetic content routes only to the local `adult_explicit` profile (LUSTIFY SDXL); never built-in generation, no silent downgrade. If it is not installed/validated, report `local_adult_unavailable`, offer setup or a non-explicit alternative, and stop. `refused` means a disallowed sexual category — relay it, never retry. See `references/adult.md`;
 - a new no-reference seed may be created by built-in generation or by ComfyUI when the optional local bootstrap capability is installed/validated;
 - after seed approval, either provider may use it through the shared trusted reference fabric.
 
