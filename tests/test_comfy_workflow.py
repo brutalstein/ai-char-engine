@@ -56,9 +56,12 @@ class RegistryTests(unittest.TestCase):
         for spec in model_specs().values():
             self.assertTrue(spec.url.startswith("https://huggingface.co/"), spec.url)
 
-    def test_all_models_apache_licensed(self) -> None:
+    def test_all_models_have_known_license(self) -> None:
+        # Identity/bootstrap stack is Apache-2.0; the adult SDXL checkpoint ships
+        # under CreativeML-OpenRAIL-M.
+        allowed = {"Apache-2.0", "CreativeML-OpenRAIL-M"}
         for spec in model_specs().values():
-            self.assertEqual(spec.license, "Apache-2.0")
+            self.assertIn(spec.license, allowed, spec.filename)
 
     def test_missing_required_detects_absent_files(self) -> None:
         with tempfile.TemporaryDirectory() as td:

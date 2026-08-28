@@ -39,11 +39,15 @@ class InstallTests(unittest.TestCase):
     def test_install_is_an_idempotent_add_or_update(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             home = Path(td)
+            expected = json.loads(
+                (ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8")
+            )["version"]
             first = module.install(home, run_pip=False, source=ROOT)
             second = module.install(home, run_pip=False, source=ROOT)
             self.assertEqual(first["action"], "installed")
             self.assertEqual(second["action"], "updated")
-            self.assertEqual(second["version"], "0.4.0")
+            self.assertEqual(first["version"], expected)
+            self.assertEqual(second["version"], expected)
             self.assertTrue((home / "plugins" / "ai-char-engine" / ".codex-plugin" / "plugin.json").is_file())
             market = json.loads((home / ".agents" / "plugins" / "marketplace.json").read_text(encoding="utf-8"))
             self.assertEqual(len([p for p in market["plugins"] if p["name"] == "ai-char-engine"]), 1)
