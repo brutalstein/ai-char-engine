@@ -57,6 +57,11 @@ def _git_sha(repo: Path) -> str:
         return ""
 
 
+def _worktree_populated(target: Path) -> bool:
+    """True if the checkout has real files, not just a bare ``.git`` directory."""
+    return any(child.name != ".git" for child in target.iterdir())
+
+
 def _ensure_pinned_repo(url: str, target: Path, pin: str, *, log: Progress | None = None) -> str:
     """Ensure target is an exact detached checkout of the tested revision."""
     target = target.resolve()
@@ -64,12 +69,14 @@ def _ensure_pinned_repo(url: str, target: Path, pin: str, *, log: Progress | Non
         raise InstallError(f"refusing to overwrite non-git directory: {target}")
     if not target.exists():
         target.parent.mkdir(parents=True, exist_ok=True)
-        _run(["git", "clone", "--filter=blob:none", "--no-checkout", url, str(target)], log=log)
-    current = _git_sha(target)
-    if current == pin:
-        return current
+        _run(["git", "clone", "--filter=blob:none", url, str(target)], log=log)
+    # Fast path only when the pin is already checked out *and* materialized. A
+    # prior interrupted run (or a clone whose default HEAD equalled the pin) can
+    # leave a valid SHA with an empty working tree; fall through and repair it.
+    if _git_sha(target) == pin and _worktree_populated(target):
+        return pin
     _run(["git", "-C", str(target), "fetch", "--depth", "1", "origin", pin], log=log)
-    _run(["git", "-C", str(target), "checkout", "--detach", "FETCH_HEAD"], log=log)
+    _run(["git", "-C", str(target), "checkout", "--detach", "--force", "FETCH_HEAD"], log=log)
     current = _git_sha(target)
     if current != pin:
         raise InstallError(f"repository pin mismatch for {target.name}: expected {pin}, got {current or 'unknown'}")
