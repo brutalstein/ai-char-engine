@@ -14,7 +14,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python-version: ["3.11", "3.13"]
+        python-version: ["3.11", "3.12", "3.13"]
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -37,3 +37,5 @@ jobs:
         run: |
           aice --home .ci-aice begin CICharacter --origin references
           aice --home .ci-aice guide cicharacter
+          aice --home .ci-aice backend set cicharacter ask_each_time
+          aice --home .ci-aice backend reset cicharacter
