@@ -42,7 +42,7 @@ def backend_health() -> dict[str, Any]:
         "default_model": profile.default_model,
         "missing_models": identity_missing,
         "capabilities": {
-            "identity": installed and not bool(identity_missing),
+            "identity": installed and not bool(identity_missing) and bool(cfg.get("validated")),
             "bootstrap": installed and not bool(bootstrap_missing) and bool(cfg.get("validated")),
             "bootstrap_missing": bootstrap_missing,
         },
@@ -86,10 +86,14 @@ def setup(
             pct = 100 * done // total if total else 0
             print(f"  {key}: {pct}% ({done // (1024*1024)}/{total // (1024*1024)} MB)", file=sys.stderr)
 
-    if capabilities:
-        registry = modelmod.load_registry()
-        expanded: list[str] = list(model_keys or [])
-        for capability in capabilities:
+    registry = modelmod.load_registry()
+    specs = modelmod.model_specs(registry)
+    # Any additive setup request keeps the required identity stack intact. Optional
+    # capabilities extend it; they never accidentally replace the normal runtime.
+    if model_keys is not None or capabilities:
+        expanded: list[str] = [k for k, spec in specs.items() if spec.required]
+        expanded.extend(model_keys or [])
+        for capability in capabilities or []:
             keys = modelmod.capability_model_keys(capability, registry)
             if not keys:
                 return {"ok": False, "error": f"unknown ComfyUI capability: {capability}"}
@@ -100,7 +104,7 @@ def setup(
         report = ComfyInstaller().setup(model_keys=model_keys, log=log, model_progress=mp)
         report["capabilities"] = backend_health().get("capabilities", {})
         return report
-    except InstallError as exc:
+    except (InstallError, OSError, KeyError) as exc:
         return {"ok": False, "error": str(exc)}
 
 
@@ -138,7 +142,7 @@ def doctor(*, smoke: bool = False) -> dict[str, Any]:
                 bootstrap = WorkflowAdapter("qwen_text_to_image")
                 bootstrap.validate(keys)
                 check("bootstrap_workflow_nodes", True, f"v{bootstrap.version}")
-        except (WorkflowError, Exception) as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             check("workflow_nodes", False, str(exc))
 
     if smoke:
