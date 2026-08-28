@@ -60,6 +60,24 @@ class InstallerTests(unittest.TestCase):
         finally:
             modelmod.free_disk_bytes = orig
 
+    def test_bootstrap_preflight_accounts_for_optional_models(self) -> None:
+        orig = modelmod.free_disk_bytes
+        modelmod.free_disk_bytes = lambda _p: 200 * 10**9
+        try:
+            base = self.inst.preflight()
+            keys = modelmod.capability_model_keys("bootstrap")
+            bootstrap = self.inst.preflight(keys)
+            self.assertGreater(bootstrap["missing_model_bytes"], 10 * 10**9)
+            self.assertIn("qwen_image_t2i_gguf_q3km", bootstrap["selected_models"])
+            self.assertGreater(bootstrap["estimated_need_gb"], 18)
+            self.assertNotEqual(base["selected_models"], bootstrap["selected_models"])
+        finally:
+            modelmod.free_disk_bytes = orig
+
+    def test_preflight_rejects_unknown_model_key(self) -> None:
+        with self.assertRaises(inst.InstallError):
+            self.inst.preflight(["not-a-model"])
+
     def test_ensure_extra_model_paths_is_idempotent(self) -> None:
         (self.root / "ComfyUI").mkdir(parents=True)
         self.inst.ensure_extra_model_paths()
@@ -90,6 +108,10 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(got, ["qwen_image_vae"])
         finally:
             modelmod.verify, modelmod.download = orig_verify, orig_dl
+
+    def test_ensure_models_rejects_unknown_key(self) -> None:
+        with self.assertRaises(inst.InstallError):
+            self.inst.ensure_models(["missing-model-key"])
 
     def test_venv_python_path_under_venv_dir(self) -> None:
         self.assertTrue(str(self.inst.venv_python).startswith(str(self.root / "venv")))
