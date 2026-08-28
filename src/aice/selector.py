@@ -23,12 +23,26 @@ KEYWORDS: dict[str, tuple[str, ...]] = {
     "legs": ("leg", "legs", "bacak", "walking", "full body", "boydan", "lounger"),
 }
 
+# Deliberate stems for Turkish conversational morphology. Everything else that is
+# a single word is matched at word boundaries; this prevents e.g. arm->warm,
+# leg->elegant and hand->handbag from steering reference geometry.
+_STEM_KEYWORDS = {"otur"}
+
+
+def _phrase_present(text: str, phrase: str) -> bool:
+    phrase = phrase.casefold()
+    if phrase in _STEM_KEYWORDS:
+        return phrase in text
+    if re.fullmatch(r"[\wçğıöşü]+", phrase, flags=re.IGNORECASE):
+        return re.search(r"(?<!\w)" + re.escape(phrase) + r"(?!\w)", text) is not None
+    return phrase in text
+
 
 def infer_tags(prompt: str) -> set[str]:
     text = " ".join(prompt.casefold().split())
     tags: set[str] = set()
     for tag, phrases in KEYWORDS.items():
-        if any(phrase in text for phrase in phrases):
+        if any(_phrase_present(text, phrase) for phrase in phrases):
             tags.add(tag)
     if "profile picture" in text or re.search(r"\binstagram\s+pp\b", text):
         tags.discard("side")

@@ -55,6 +55,18 @@ def capability_model_keys(capability: str, registry: dict[str, Any] | None = Non
     return [str(k) for k in keys]
 
 
+def capabilities_for_model_keys(keys: list[str] | tuple[str, ...],
+                                registry: dict[str, Any] | None = None) -> set[str]:
+    """Capabilities whose declared model bundle intersects ``keys``."""
+    reg = registry or load_registry()
+    wanted = set(keys)
+    return {
+        str(capability)
+        for capability, model_keys in reg.get("capability_models", {}).items()
+        if wanted.intersection(str(k) for k in model_keys)
+    }
+
+
 def capability_missing(models_dir: Path, capability: str,
                        registry: dict[str, Any] | None = None) -> list[str]:
     reg = registry or load_registry()
@@ -148,10 +160,12 @@ def download(
     resume: bool = True,
     check_hash: bool = True,
 ) -> Path:
-    """Resumable download to ``dest``. Skips work when an intact file already exists."""
+    """Resumable download to ``dest`` with optional exact integrity verification."""
 
     dest = Path(dest)
-    if verify(dest, spec, check_hash=False)[0]:
+    # Setup/install paths request check_hash=True. Do not trust a same-sized cached
+    # file without hashing it: a truncated/tampered file can otherwise survive forever.
+    if verify(dest, spec, check_hash=check_hash)[0]:
         return dest
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_suffix(dest.suffix + ".part")

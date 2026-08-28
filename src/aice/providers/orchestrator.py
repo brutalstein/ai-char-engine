@@ -1,7 +1,7 @@
 """Glue between Character Brain state and pixel providers.
 
-v0.4 makes provider choice capability-aware and permits bounded cross-provider help
-without ever letting a provider own character truth or reference trust.
+Provider choice is capability-aware and permits bounded cross-provider help without
+ever letting a provider own character truth or reference trust.
 """
 from __future__ import annotations
 
@@ -141,11 +141,15 @@ def _execute(
     report,
 ) -> GenerationResult:
     builtin = CodexBuiltinProvider()
-    local_ready, _ = comfy_ready(probe)
-    local_ready = bool(local_ready and provider is not None)
+    normal_local_ready, _ = comfy_ready(probe)
+    normal_local_ready = bool(normal_local_ready and provider is not None)
+
+    # Operation-specific readiness is authoritative for the current request. This is
+    # intentionally independent from the identity probe: adult/bootstrap capabilities
+    # carry their own smoke-validation state in v0.5.1.
     local_request_ready = False
     local_caps = provider.capabilities() if provider is not None else None
-    if provider is not None and local_ready:
+    if provider is not None:
         local_request_ready = bool(provider.available_for(req)[0])
     if local_caps is None:
         from .base import ProviderCapabilities
@@ -154,7 +158,7 @@ def _execute(
     plan = build_plan(
         mode,
         req,
-        local_ready=local_ready,
+        local_ready=normal_local_ready,
         local_request_ready=local_request_ready,
         local_caps=local_caps,
         builtin_caps=builtin.capabilities(),
@@ -203,7 +207,6 @@ def _execute(
                 )
         else:
             result = provider.generate(req, progress=report)
-        # Explicit adult never silently downgrades to built-in cloud image generation.
         if result.status == "failed" and mode in {"auto", "hybrid"} and not explicit_adult:
             report({"stage": "fallback_planned", "from": "comfyui", "to": "codex_builtin"})
             fallback = builtin.generate(req, progress=report)
@@ -329,9 +332,35 @@ def plan_seed_generation(
             progress(dict(event))
 
     verdict = classify_explicitness(description)
+    report({"stage": "intent_classified", "level": verdict.level,
+            "matched": list(verdict.matched), "wants_local_adult": verdict.wants_local_adult})
     if verdict.level == DISALLOWED:
         report({"stage": "request_refused", "reason": verdict.reason})
         return {"result": _refused_result(verdict), "context": None, "backend_selected": None,
+                "backend_effective": None, "backend_dialog": None, "trace": trace}
+
+    # The adult LUSTIFY workflow is reference-driven. A scratch request that is
+    # already explicit must never leak to built-in image_gen or unrelated Qwen T2I.
+    # Establish/approve the identity neutrally first, then the explicit request can
+    # use that trusted seed locally.
+    if verdict.is_explicit or verdict.wants_local_adult:
+        report({"stage": "adult_identity_required",
+                "reason": "explicit local generation requires an approved identity seed"})
+        result = GenerationResult(
+            backend="comfyui",
+            status="adult_identity_required",
+            error=(
+                "Explicit local generation needs an approved identity reference first. "
+                "Create and approve a non-explicit identity seed, then retry the explicit request; "
+                "the explicit image will stay on the local adult backend."
+            ),
+            handoff={
+                "next": "create_and_approve_non_explicit_seed",
+                "then": "retry_original_explicit_request",
+                "cloud_explicit_generation": False,
+            },
+        )
+        return {"result": result, "context": None, "backend_selected": "comfyui",
                 "backend_effective": None, "backend_dialog": None, "trace": trace}
 
     _, profile = load_profile(home, character)
@@ -339,8 +368,7 @@ def plan_seed_generation(
     report({"stage": "seed_contract_compiled", "reference_count": 0})
     probe, provider = safe_comfy_probe()
     preference = get_backend_preference(profile)
-    local_ready, _ = comfy_ready(probe)
-    local_bootstrap = bool(local_ready and provider is not None and provider.available_for(req)[0])
+    local_bootstrap = bool(provider is not None and provider.available_for(req)[0])
 
     if backend is not None:
         mode = backend
@@ -365,7 +393,7 @@ def plan_seed_generation(
         result = GenerationResult(
             backend="comfyui",
             status="needs_backend_setup",
-            error="Local text-to-image bootstrap is not installed/ready.",
+            error="Local text-to-image bootstrap is not installed/ready/validated.",
             handoff={
                 "setup": "aice comfy setup --capabilities bootstrap",
                 "then": "aice comfy doctor --smoke",

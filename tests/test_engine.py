@@ -7,6 +7,8 @@ from pathlib import Path
 
 from aice.brain import add_observations, brain_summary, lock_fact
 from aice.engine import bootstrap_plan, build_context, render_generation_prompt
+from aice.providers import ux as provider_ux
+from aice.providers.router import BackendProbe
 from aice.selector import BUDGETS, infer_tags, recent_avoidance, select_references
 from aice.storage import (
     create_character,
@@ -37,8 +39,13 @@ class EngineTests(unittest.TestCase):
             tier="golden",
             tags=["face", "front", "upper_body"],
         )
+        # Unit tests must not change behavior just because the developer has a real
+        # validated ComfyUI installation in ~/.aice/runtime.
+        self._orig_comfy_probe = provider_ux.safe_comfy_probe
+        provider_ux.safe_comfy_probe = lambda: (BackendProbe(installed=False), None)
 
     def tearDown(self) -> None:
+        provider_ux.safe_comfy_probe = self._orig_comfy_probe
         self.tmp.cleanup()
 
     def _observe(self, path: str, value, ref_id: str | None = None) -> None:
@@ -139,6 +146,14 @@ class EngineTests(unittest.TestCase):
         self.assertLessEqual(len(refs), BUDGETS["economy"]["max_refs"])
         self.assertTrue(all(r["tier"] in {"golden", "trusted"} for r in refs))
 
+    def test_selector_single_word_geometry_uses_boundaries(self) -> None:
+        warm = infer_tags("warm portrait in a cafe")
+        elegant = infer_tags("elegant portrait, editorial lighting")
+        handbag = infer_tags("portrait with a handbag")
+        self.assertNotIn("arms", warm)      # arm must not match warm
+        self.assertNotIn("legs", elegant)  # leg must not match elegant
+        self.assertNotIn("hands", handbag) # hand must not match handbag
+
     def test_profile_picture_not_side_profile(self) -> None:
         tags = infer_tags("Instagram profile picture, natural outdoor portrait")
         self.assertIn("face", tags)
@@ -160,7 +175,7 @@ class EngineTests(unittest.TestCase):
             "kind": "tattoo", "location": "left_wrist", "description": "small crescent", "visibility_tags": ["hands", "arms"]
         }, self.seed_ref["id"])
         context = build_context(self.home, "maya-test", "selfie holding a drink", "balanced")
-        self.assertLessEqual(len(compact_json(context)), BUDGETS["balanced"]["context_chars"])
+        self.assertLessEqual(len(json.dumps(context, ensure_ascii=False, separators=(",", ":"))), BUDGETS["balanced"]["context_chars"])
         prompt = render_generation_prompt(context)
         self.assertIn("small crescent", prompt)
         self.assertIn("exact same adult synthetic character", prompt)

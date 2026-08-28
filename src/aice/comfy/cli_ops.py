@@ -10,7 +10,7 @@ from . import models as modelmod
 from . import policy as policymod
 from .installer import ComfyInstaller, InstallError
 from .runtime import ComfyRuntime
-from .workflow import WorkflowAdapter, WorkflowError
+from .workflow import WorkflowAdapter
 
 
 def _hw() -> hwmod.HardwareProfile:
@@ -26,16 +26,26 @@ def backend_health() -> dict[str, Any]:
     identity_missing = modelmod.capability_missing(rt.models_dir, "identity") if installed else None
     bootstrap_missing = modelmod.capability_missing(rt.models_dir, "bootstrap") if installed else None
     adult_missing = modelmod.capability_missing(rt.models_dir, "adult_explicit") if installed else None
+    identity_validated = cfgmod.capability_validated(cfg, "identity")
+    bootstrap_validated = cfgmod.capability_validated(cfg, "bootstrap")
+    adult_validated = cfgmod.capability_validated(cfg, "adult_explicit")
+    identity_ready = installed and not bool(identity_missing) and identity_validated
+    bootstrap_ready = installed and not bool(bootstrap_missing) and bootstrap_validated
+    adult_ready = installed and not bool(adult_missing) and adult_validated
     if not installed:
         state = "unavailable"
-    elif identity_missing or not cfg.get("validated"):
+    elif not identity_ready:
         state = "degraded"
     else:
         state = "available"
     return {
         "state": state,
         "installed": installed,
-        "validated": bool(cfg.get("validated")),
+        "validated": identity_validated,  # legacy/base compatibility
+        "validated_capabilities": {
+            capability: cfgmod.capability_validation(cfg, capability)
+            for capability in cfgmod.KNOWN_CAPABILITIES
+        },
         "gpu": hw.gpu_name or None,
         "vram_total_mb": hw.vram_total_mb or None,
         "is_blackwell": hw.is_blackwell,
@@ -43,10 +53,11 @@ def backend_health() -> dict[str, Any]:
         "default_model": profile.default_model,
         "missing_models": identity_missing,
         "capabilities": {
-            "identity": installed and not bool(identity_missing) and bool(cfg.get("validated")),
-            "bootstrap": installed and not bool(bootstrap_missing) and bool(cfg.get("validated")),
+            "identity": identity_ready,
+            "identity_missing": identity_missing,
+            "bootstrap": bootstrap_ready,
             "bootstrap_missing": bootstrap_missing,
-            "adult_explicit": installed and not bool(adult_missing) and bool(cfg.get("validated")),
+            "adult_explicit": adult_ready,
             "adult_explicit_missing": adult_missing,
         },
         "runtime_dir": str(rt.runtime_dir),
@@ -61,7 +72,8 @@ def status() -> dict[str, Any]:
         "config": cfgmod.config_path().as_posix(),
         "pins": cfg.get("pins", {}),
         "profile": cfg.get("profile"),
-        "validated": cfg.get("validated", False),
+        "validated": cfgmod.capability_validated(cfg, "identity"),
+        "validated_capabilities": cfg.get("validated_capabilities", {}),
         "capabilities": backend_health().get("capabilities", {}),
         **rt.status(),
     }
@@ -91,8 +103,6 @@ def setup(
 
     registry = modelmod.load_registry()
     specs = modelmod.model_specs(registry)
-    # Any additive setup request keeps the required identity stack intact. Optional
-    # capabilities extend it; they never accidentally replace the normal runtime.
     if model_keys is not None or capabilities:
         expanded: list[str] = [k for k, spec in specs.items() if spec.required]
         expanded.extend(model_keys or [])
@@ -153,12 +163,25 @@ def doctor(*, smoke: bool = False) -> dict[str, Any]:
             check("workflow_nodes", False, str(exc))
 
     if smoke:
-        report["smoke"] = _smoke_test(rt, hw)
-        cfg["validated"] = bool(report["smoke"].get("ok"))
+        identity_smoke = _smoke_test(rt, hw)
+        bootstrap_smoke = _bootstrap_smoke(rt, hw)
+        adult_smoke = _adult_smoke(rt, hw)
+        # Keep the old top-level identity fields for compatibility while exposing the
+        # real capability ledger explicitly.
+        report["smoke"] = {
+            **identity_smoke,
+            "identity": identity_smoke,
+            "bootstrap": bootstrap_smoke,
+            "adult": adult_smoke,
+            "adult_explicit": adult_smoke,
+        }
+        cfgmod.set_capability_validation(cfg, "identity", identity_smoke)
+        cfgmod.set_capability_validation(cfg, "bootstrap", bootstrap_smoke)
+        cfgmod.set_capability_validation(cfg, "adult_explicit", adult_smoke)
         cfg["smoke"] = report["smoke"]
-        winner = report["smoke"].get("winner")
+        winner = identity_smoke.get("winner")
         if winner:
-            cfg["tuned"] = {"default_model": winner, "measured_at": report["smoke"].get("at")}
+            cfg["tuned"] = {"default_model": winner, "measured_at": identity_smoke.get("at")}
         cfgmod.save_config(cfg)
         report["backend"] = backend_health()
 
@@ -171,6 +194,7 @@ _SMOKE_LATENCY_CEILING_S = 420.0
 
 
 def _smoke_test(rt: ComfyRuntime, hw: hwmod.HardwareProfile) -> dict[str, Any]:
+    """Real identity-capability smoke test."""
     import tempfile
     import time
     from pathlib import Path
@@ -198,7 +222,7 @@ def _smoke_test(rt: ComfyRuntime, hw: hwmod.HardwareProfile) -> dict[str, Any]:
             out = Path(td) / f"out_{key}"
             req = GenerationRequest(
                 character="smoke",
-                prompt="a natural candid photo of a person, soft daylight",
+                prompt="a natural candid photo of an adult person, soft daylight",
                 reference_paths=(ref,),
                 aspect="portrait",
                 budget="balanced",
@@ -209,7 +233,9 @@ def _smoke_test(rt: ComfyRuntime, hw: hwmod.HardwareProfile) -> dict[str, Any]:
             try:
                 local_cfg = cfgmod.load_config()
                 local_cfg["tuned"] = {"default_model": key}
-                result = ComfyUIProvider(config=local_cfg, hardware=hw).generate(req)
+                result = ComfyUIProvider(
+                    config=local_cfg, hardware=hw, validation_required=False,
+                ).generate(req)
                 dt = round(time.monotonic() - t0, 1)
                 ok = result.status == "ok" and result.output_path is not None
                 attempts[key] = {
@@ -225,11 +251,7 @@ def _smoke_test(rt: ComfyRuntime, hw: hwmod.HardwareProfile) -> dict[str, Any]:
                 attempts[key] = {"ok": False, "status": "crash", "error": repr(exc),
                                  "duration_s": round(time.monotonic() - t0, 1)}
             finally:
-                try:
-                    rt.client().free()
-                    time.sleep(3)
-                except Exception:  # noqa: BLE001
-                    pass
+                _free(rt)
             a = attempts[key]
             if a["ok"] and a["duration_s"] <= _SMOKE_LATENCY_CEILING_S:
                 winner = key
@@ -243,7 +265,6 @@ def _smoke_test(rt: ComfyRuntime, hw: hwmod.HardwareProfile) -> dict[str, Any]:
     return {
         "ok": winner is not None,
         "winner": winner,
-        "adult": _adult_smoke(rt, hw),
         "gpu": hw.gpu_name,
         "vram_total_mb": hw.vram_total_mb,
         "status": best.get("status", "failed"),
@@ -259,14 +280,51 @@ def _smoke_test(rt: ComfyRuntime, hw: hwmod.HardwareProfile) -> dict[str, Any]:
     }
 
 
-def _adult_smoke(rt: ComfyRuntime, hw: hwmod.HardwareProfile) -> dict[str, Any]:
-    """One real LUSTIFY (explicit-adult profile) generation, if its models are present.
+def _bootstrap_smoke(rt: ComfyRuntime, hw: hwmod.HardwareProfile) -> dict[str, Any]:
+    """Real no-reference Qwen text-to-image bootstrap smoke, when installed."""
+    if not modelmod.capability_ready(rt.models_dir, "bootstrap"):
+        return {"ok": False, "skipped": "bootstrap models not installed", "at": _utc()}
 
-    Non-explicit prompt on purpose: this validates the SDXL + IP-Adapter graph and
-    8 GB fit, not the model's uncensored behaviour.
-    """
+    import tempfile
+    import time
+    from pathlib import Path
+
+    from ..providers.base import GenerationRequest
+    from ..providers.comfyui import ComfyUIProvider
+
+    with tempfile.TemporaryDirectory() as td:
+        req = GenerationRequest(
+            character="smoke-bootstrap",
+            prompt="a natural portrait photo of an original adult synthetic person, soft daylight",
+            operation="bootstrap", aspect="portrait", budget="balanced", seed=1234,
+            out_dir=Path(td) / "bootstrap_out",
+        )
+        t0 = time.monotonic()
+        try:
+            result = ComfyUIProvider(
+                config=cfgmod.load_config(), hardware=hw, validation_required=False,
+            ).generate(req)
+            dt = round(time.monotonic() - t0, 1)
+            ok = result.status == "ok" and result.output_path is not None
+            return {
+                "ok": ok, "status": result.status, "error": result.error, "duration_s": dt,
+                "model_id": result.model_id, "workflow_version": result.workflow_version,
+                "resolution": [result.effective_settings.get("width"), result.effective_settings.get("height")],
+                "output_bytes": (result.output_path.stat().st_size
+                                 if result.output_path and result.output_path.exists() else 0),
+                "at": _utc(),
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "status": "crash", "error": repr(exc),
+                    "duration_s": round(time.monotonic() - t0, 1), "at": _utc()}
+        finally:
+            _free(rt)
+
+
+def _adult_smoke(rt: ComfyRuntime, hw: hwmod.HardwareProfile) -> dict[str, Any]:
+    """One real LUSTIFY graph/VRAM smoke, if its models are present."""
     if not modelmod.capability_ready(rt.models_dir, "adult_explicit"):
-        return {"ok": False, "skipped": "adult_explicit models not installed"}
+        return {"ok": False, "skipped": "adult_explicit models not installed", "at": _utc()}
 
     import tempfile
     import time
@@ -286,7 +344,9 @@ def _adult_smoke(rt: ComfyRuntime, hw: hwmod.HardwareProfile) -> dict[str, Any]:
         )
         t0 = time.monotonic()
         try:
-            result = ComfyUIProvider(config=cfgmod.load_config(), hardware=hw).generate(req)
+            result = ComfyUIProvider(
+                config=cfgmod.load_config(), hardware=hw, validation_required=False,
+            ).generate(req)
             dt = round(time.monotonic() - t0, 1)
             ok = result.status == "ok" and result.output_path is not None
             return {
@@ -296,16 +356,22 @@ def _adult_smoke(rt: ComfyRuntime, hw: hwmod.HardwareProfile) -> dict[str, Any]:
                 "ipadapter_weight": result.effective_settings.get("ipadapter_weight"),
                 "output_bytes": (result.output_path.stat().st_size
                                  if result.output_path and result.output_path.exists() else 0),
+                "at": _utc(),
             }
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "status": "crash", "error": repr(exc),
-                    "duration_s": round(time.monotonic() - t0, 1)}
+                    "duration_s": round(time.monotonic() - t0, 1), "at": _utc()}
         finally:
-            try:
-                rt.client().free()
-                time.sleep(3)
-            except Exception:  # noqa: BLE001
-                pass
+            _free(rt)
+
+
+def _free(rt: ComfyRuntime) -> None:
+    import time
+    try:
+        rt.client().free()
+        time.sleep(3)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _utc() -> str:

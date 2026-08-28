@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -12,7 +13,7 @@ _PAYLOAD = bytes(range(256)) * 400  # 102_400 bytes, deterministic
 
 
 class _Handler(BaseHTTPRequestHandler):
-    def log_message(self, *_a):  # quiet
+    def log_message(self, *_a):
         pass
 
     def do_GET(self):  # noqa: N802
@@ -23,7 +24,6 @@ class _Handler(BaseHTTPRequestHandler):
             start = int(rng.split("=")[1].split("-")[0])
         s.calls += 1
         body = _PAYLOAD[start:]
-        # First response for a fresh (non-range) pull is truncated then cut off.
         if s.calls == 1 and start == 0:
             body = body[: len(_PAYLOAD) // 3]
         if start:
@@ -52,11 +52,13 @@ class DownloadResumeTests(unittest.TestCase):
         self.srv.shutdown()
         self.srv.server_close()
 
-    def _spec(self) -> ModelSpec:
+    def _spec(self, *, hashed: bool = False) -> ModelSpec:
         return ModelSpec(
             key="t", filename="t.bin", dest_subdir=".",
             url=f"http://127.0.0.1:{self.port}/t.bin",
-            size_bytes=len(_PAYLOAD), sha256=None, license="Apache-2.0", required=True,
+            size_bytes=len(_PAYLOAD),
+            sha256=hashlib.sha256(_PAYLOAD).hexdigest() if hashed else None,
+            license="Apache-2.0", required=True,
         )
 
     def test_resumes_after_early_stream_close(self) -> None:
@@ -65,7 +67,7 @@ class DownloadResumeTests(unittest.TestCase):
             out = download(self._spec(), dest, check_hash=False)
             self.assertEqual(out.read_bytes(), _PAYLOAD)
             self.assertFalse(dest.with_suffix(".bin.part").exists())
-            self.assertGreaterEqual(self.srv.calls, 2)  # needed a resume
+            self.assertGreaterEqual(self.srv.calls, 2)
 
     def test_noop_when_already_complete(self) -> None:
         with TemporaryDirectory() as td:
@@ -73,6 +75,14 @@ class DownloadResumeTests(unittest.TestCase):
             dest.write_bytes(_PAYLOAD)
             download(self._spec(), dest, check_hash=False)
             self.assertEqual(self.srv.calls, 0)
+
+    def test_same_size_corrupt_cached_file_is_not_trusted_when_hash_requested(self) -> None:
+        with TemporaryDirectory() as td:
+            dest = Path(td) / "t.bin"
+            dest.write_bytes(b"x" * len(_PAYLOAD))
+            out = download(self._spec(hashed=True), dest, check_hash=True)
+            self.assertEqual(out.read_bytes(), _PAYLOAD)
+            self.assertGreater(self.srv.calls, 0)
 
 
 if __name__ == "__main__":

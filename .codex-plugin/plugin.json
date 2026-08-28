@@ -1,6 +1,6 @@
 {
   "name": "ai-char-engine",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Conversational evidence-grounded persistent character engine with capability-aware Codex and local ComfyUI image orchestration.",
   "author": {
     "name": "Cenker Usta",
@@ -14,7 +14,7 @@
   "interface": {
     "displayName": "AI Character Engine",
     "shortDescription": "One character, intelligently shared across image engines.",
-    "longDescription": "A conversational Codex workflow that builds an evidence-grounded Character Brain and provider-neutral trusted reference fabric, can create a first identity with Codex or an optional validated local ComfyUI bootstrap workflow, intelligently routes later images, and permits bounded cross-provider reference expansion or repair without sacrificing lineage, privacy, or identity consistency.",
+    "longDescription": "A conversational Codex workflow that builds an evidence-grounded Character Brain and provider-neutral trusted reference fabric, can create a first identity with Codex or validated local ComfyUI capabilities, intelligently routes later images, and permits bounded cross-provider reference expansion or repair without sacrificing lineage, privacy, validation, or identity consistency.",
     "developerName": "Cenker Usta",
     "category": "Productivity",
     "capabilities": ["Read", "Write"],

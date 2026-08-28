@@ -245,10 +245,12 @@ class ComfyInstaller:
         for key in chosen:
             spec = specs[key]
             dest = spec.dest(self.models_dir)
-            if modelmod.verify(dest, spec)[0]:
+            # Setup is intentionally strict: size-only checks are fast runtime probes,
+            # but an installer declaring a model intact must verify the pinned hash.
+            if modelmod.verify(dest, spec, check_hash=True)[0]:
                 continue
             cb = (lambda d, t, _k=key: progress(_k, d, t)) if progress else None
-            modelmod.download(spec, dest, progress=cb)
+            modelmod.download(spec, dest, progress=cb, check_hash=True)
             fetched.append(key)
         return fetched
 
@@ -278,8 +280,16 @@ class ComfyInstaller:
         }
         self.cfg["pins"] = new_pins
         self.cfg["profile"] = profile_name
+
+        affected: set[str] = set()
         if old_pins and old_pins != new_pins:
-            self.cfg["validated"] = False
+            affected.update(cfgmod.KNOWN_CAPABILITIES)
+        affected.update(modelmod.capabilities_for_model_keys(fetched, self.registry))
+        if affected:
+            cfgmod.invalidate_capabilities(
+                self.cfg, sorted(affected),
+                "runtime/model inputs changed; rerun `aice comfy doctor --smoke`",
+            )
         cfgmod.save_config(self.cfg)
         return {
             "preflight": pre,
@@ -290,4 +300,5 @@ class ComfyInstaller:
             "models_fetched": fetched,
             "profile": self.cfg["profile"],
             "validated": bool(self.cfg.get("validated")),
+            "validated_capabilities": dict(self.cfg.get("validated_capabilities", {})),
         }

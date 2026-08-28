@@ -4,68 +4,46 @@ Load this only for local setup/execution/recovery. The normal user never operate
 
 ## Role
 
-ComfyUI is a local pixel worker behind AICE. Character Brain, trust, reference selection, provenance and validation remain provider-neutral. A trusted reference may have originated from the user, Codex built-in generation, or ComfyUI; origin records lineage but never grants trust.
+ComfyUI is a local pixel worker behind AICE. Character Brain, trust, reference selection and provenance remain provider-neutral. Provider origin records lineage but never grants trust.
 
 Normal strategies:
-- `comfyui` — force local for this request/default; never silently switch if it fails;
-- `codex_builtin` — built-in `image_gen`; never start ComfyUI;
-- `auto` — capability-aware primary selection with bounded fallback/optional cross-provider assistance;
-- one-shot `hybrid` — explicitly allow the planner to use the best primary plus at most one justified cross-provider stage;
+- `comfyui` — force local; never silently switch if it fails;
+- `codex_builtin` — built-in image generation for non-explicit workflows;
+- `auto` — capability-aware primary selection with bounded fallback/help where allowed;
+- one-shot `hybrid` — best primary plus at most one justified cross-provider stage;
 - `ask_each_time` — ask only when both relevant choices are viable.
 
-## Identity/reference stack
+## Identity stack
 
-The tuned 8 GB RTX 5070 Laptop identity path remains conservative:
-- Qwen-Image-Edit-2509 via `ComfyUI-GGUF`;
-- Q3_K_M default + 8-step Lightning;
-- native multi-image edit conditioning, up to 3 provider inputs;
-- ~1 MP scene buckets, batch 1;
-- low-VRAM / VRAM reserve / CPU VAE decode policy on 8 GB;
-- localhost `127.0.0.1` only;
-- runtime/models outside Git under AICE local runtime paths.
+The tuned 8 GB identity path uses Qwen-Image-Edit-2509 via ComfyUI-GGUF, Q3_K_M + 8-step Lightning, up to three provider inputs, ~1 MP buckets, batch 1, low-VRAM/VRAM-reserve/CPU-VAE policy, localhost only, and runtime/models outside Git.
 
-This path handles normal identity generation, reference expansion and targeted edit/repair from trusted references.
+It handles normal identity generation, reference expansion and targeted edit/repair from trusted references.
 
-## Optional local character bootstrap
+## Optional bootstrap
 
-v0.4 can also create the **first no-reference synthetic identity locally** when the user wants that capability. It is intentionally optional because it adds substantial disk usage.
+Local first-character creation is separately optional because it adds substantial weights:
 
-Bootstrap stack:
-- Qwen-Image text-to-image GGUF `qwen-image-Q3_K_M.gguf`;
+- Qwen-Image text-to-image GGUF Q3_K_M;
 - Qwen-Image Lightning 8-step LoRA;
-- shared Qwen 2.5 VL text encoder + Qwen Image VAE;
-- versioned `qwen_text_to_image` API workflow;
+- shared Qwen text encoder + VAE;
+- `qwen_text_to_image` workflow;
 - no reference required.
 
-Codex installs it internally only when requested/needed:
+Install only when requested/needed, then smoke-validate it. If unavailable, built-in generation remains a valid **non-explicit** first-seed provider.
+
+An explicit scratch request is different: it returns `adult_identity_required`. Establish/approve a neutral adult identity first; never forward the explicit scratch description to built-in generation or Qwen bootstrap.
+
+## Capability validation
+
+v0.5.1 tracks readiness independently:
 
 ```text
-aice comfy setup --capabilities bootstrap
-aice comfy doctor --smoke
+identity
+bootstrap
+adult_explicit
 ```
 
-The bootstrap models are not part of the default required download. Do not claim a newer model family is locally supported merely because it exists upstream; only advertise workflows actually present, pinned and runnable by this plugin.
-
-If local bootstrap is unavailable, built-in `image_gen` remains a valid first-seed provider. After the user approves that seed, ComfyUI may use it as a golden identity reference and derive missing views. The inverse is also true: a Comfy-created approved seed may later be used by built-in generation.
-
-## Trust / interoperability
-
-Provider origin and trust are separate axes:
-
-```text
-user upload ----------------------> golden
-Codex/Comfy first seed + approval -> golden
-Codex/Comfy derived output --------> candidate -> quality gate -> trusted/golden
-```
-
-Rules:
-- provider output never self-promotes;
-- candidate/rejected images never condition normal generation;
-- generated derivatives require trusted parent IDs;
-- cross-provider reuse is allowed only after the same trust gate;
-- a repair target is an edit target, not automatically an identity reference.
-
-## Setup and validation
+A model file being present is not enough. The capability must also pass its own current local smoke. Runtime/pin/model changes invalidate affected validation until doctor succeeds again.
 
 Default local identity setup:
 
@@ -74,48 +52,54 @@ aice comfy setup
 aice comfy doctor --smoke
 ```
 
-Optional bootstrap download:
+Optional bootstrap:
 
 ```text
 aice comfy setup --capabilities bootstrap
 aice comfy doctor --smoke
 ```
 
-Setup is idempotent, revision-pinned and disk-aware. Intact weights are reused. Optional capability downloads are included in disk preflight rather than hidden behind the base install estimate.
+Optional adult:
 
-A failed smoke keeps automatic local routing degraded. Do not repeatedly rerun setup/smoke during ordinary requests.
+```text
+aice comfy setup --capabilities adult_explicit
+aice comfy doctor --smoke
+```
+
+Setup is idempotent, revision-pinned, disk-aware, resumable, and hash-verified. Installer decisions verify SHA-256 rather than trusting a same-sized cached file.
+
+## Trust / interoperability
+
+```text
+user upload ----------------------> golden
+Codex/Comfy seed + approval ------> golden
+Codex/Comfy derivative -----------> candidate -> quality gate -> trusted/golden
+```
+
+Rules:
+- provider output never self-promotes;
+- candidate/rejected images never condition normal generation;
+- generated derivatives require trusted parent IDs;
+- cross-provider reuse is allowed only after the same trust gate;
+- a repair target is an edit target, not identity truth.
 
 ## Execution
 
-Normal provider-neutral command:
+Normal internal entry point:
 
 ```text
 aice generate <character> "<request>" --budget balanced --progress
 ```
 
-Useful one-shot variants:
+One-shot internal variants include `--backend hybrid`, `--operation reference_expand`, `--operation repair --repair-of <image>`, and `aice seed-generate ... --backend comfyui`. Codex invokes them; do not teach commands to normal users unless they request developer detail.
 
-```text
-aice generate <character> "<request>" --backend hybrid --progress
-aice generate <character> "<reference view>" --operation reference_expand --progress
-aice generate <character> "<targeted correction>" --operation repair --repair-of <image> --progress
-aice seed-generate <character> "<description>" --backend comfyui --progress
-```
+## Progress / failure semantics
 
-Codex invokes these; never teach them to normal users unless they request developer detail.
+Factual stages include context/plan/backend selection, setup-required, local start, settings, reference upload, workflow submit/render/fetch, complete, recovery/failure, and planner-authorized fallback. No fake percentages or ETAs.
 
-## Generation trace
-
-Factual stages may include:
-`seed_contract_compiled`, `context_compiled`, `plan_resolved`, `backend_selected`, `backend_setup_required`, `local_backend_starting`, `settings_resolved`, `references_uploading`, `workflow_preparing`, `workflow_submitted`, `rendering`, `output_fetching`, `provider_complete`, `recovering`, `provider_failed`, `fallback_planned`.
-
-No fake percentages or ETAs.
-
-## Failure semantics
-
-- explicit/saved `comfyui`: failure remains local; ask before another provider;
-- `auto`/one-shot `hybrid`: one bounded local recovery, then planner-authorized fallback if needed;
-- built-in explicit: do not start ComfyUI;
-- unset/ask-each-time: ask only if the relevant local capability is actually viable.
+- explicit/saved local choice: failure remains local unless the product contract explicitly allows otherwise;
+- normal `auto`/one-shot `hybrid`: one bounded recovery, then only planner-authorized fallback;
+- explicit adult: validated local adult capability only; no built-in fallback;
+- unset/ask-each-time: ask only if the relevant capability is actually viable.
 
 Never kill unrelated processes, expose the server to LAN/Internet, or commit runtime/model/private state.
