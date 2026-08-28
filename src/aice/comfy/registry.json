@@ -1,16 +1,16 @@
 {
   "schema_version": 1,
-  "note": "Model stack for the Qwen-Image-Edit-2509 GGUF identity workflow. Files download to <models_dir>/<dest_subdir>/<filename>. Sizes/hashes pin the exact revision; installer verifies before use. Nothing here is committed as a binary.",
+  "note": "Pinned model/runtime stack for the Qwen-Image-Edit-2509 GGUF identity workflow. Runtime repositories are checked out at exact revisions; model files are verified by size and SHA-256. Nothing here is committed as a binary.",
   "comfyui": {
-    "repo": "https://github.com/comfyanonymous/ComfyUI.git",
-    "pin": "master",
-    "min_version": "0.3.60"
+    "repo": "https://github.com/Comfy-Org/ComfyUI.git",
+    "pin": "12d5279438bfefc058a269eae805ceab6047777f",
+    "version": "0.34.0"
   },
   "custom_nodes": [
     {
       "name": "ComfyUI-GGUF",
       "repo": "https://github.com/city96/ComfyUI-GGUF.git",
-      "pin": "main",
+      "pin": "6ea2651e7df66d7585f6ffee804b20e92fb38b8a",
       "required_class_types": ["UnetLoaderGGUF"],
       "license": "Apache-2.0"
     }
@@ -18,7 +18,7 @@
   "torch": {
     "index_url": "https://download.pytorch.org/whl/cu130",
     "packages": ["torch", "torchvision", "torchaudio"],
-    "reason": "cu130 ships the Blackwell (sm_120) CUDA kernels the RTX 50-series needs"
+    "reason": "cu130 ships Blackwell (sm_120) CUDA kernels required by RTX 50-series GPUs"
   },
   "models": {
     "qwen_image_edit_2509_gguf_q3km": {
