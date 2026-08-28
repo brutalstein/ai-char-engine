@@ -69,6 +69,33 @@ def capability_ready(models_dir: Path, capability: str,
     return bool(keys) and not capability_missing(models_dir, capability, registry)
 
 
+def model_profiles(registry: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
+    """Machine-readable per-model profiles (see registry.json ``model_profiles``)."""
+    reg = registry or load_registry()
+    return {str(k): dict(v) for k, v in reg.get("model_profiles", {}).items()}
+
+
+def model_profile_state(models_dir: Path, model_id: str,
+                        registry: dict[str, Any] | None = None) -> dict[str, Any]:
+    """A profile enriched with live installed/missing state and the resolved local path."""
+    reg = registry or load_registry()
+    profile = dict(model_profiles(reg).get(model_id, {}))
+    if not profile:
+        return {"model_id": model_id, "known": False}
+    capability = str(profile.get("capability", ""))
+    missing = capability_missing(models_dir, capability, reg) if capability else ["*"]
+    key = str(profile.get("model_key", model_id))
+    specs = model_specs(reg)
+    local_path = str(specs[key].dest(models_dir)) if key in specs else None
+    return {
+        **profile,
+        "known": True,
+        "installed": not missing,
+        "missing_models": missing,
+        "local_path": local_path,
+    }
+
+
 def sha256_file(path: Path, chunk: int = 4 * 1024 * 1024) -> str:
     h = hashlib.sha256()
     with path.open("rb") as fh:

@@ -71,6 +71,9 @@ class WorkflowAdapter:
         scheduler: str,
         reference_names: list[str] | None = None,
         lora_name: str | None = None,
+        ipadapter_weight: float | None = None,
+        ipadapter_file: str | None = None,
+        clip_vision_file: str | None = None,
         output_prefix: str = "AICE",
     ) -> dict[str, Any]:
         reference_names = list(reference_names or [])
@@ -96,6 +99,12 @@ class WorkflowAdapter:
         }
         if lora_name is not None:
             values["lora_name"] = lora_name
+        if ipadapter_weight is not None:
+            values["ipadapter_weight"] = float(ipadapter_weight)
+        if ipadapter_file is not None:
+            values["ipadapter_file"] = ipadapter_file
+        if clip_vision_file is not None:
+            values["clip_vision_file"] = clip_vision_file
 
         for key, value in values.items():
             spec = slots.get(key)

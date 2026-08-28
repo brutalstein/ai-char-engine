@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "note": "Pinned runtime plus two auditable Qwen GGUF capabilities: required Qwen-Image-Edit-2509 identity generation and optional Qwen-Image text-to-image bootstrap. Bootstrap weights are downloaded only when requested. Model files are verified by exact size and SHA-256.",
+  "note": "Pinned runtime plus auditable model capabilities: required Qwen-Image-Edit-2509 identity generation, optional Qwen-Image text-to-image bootstrap, and the optional local explicit-adult profile (LUSTIFY SDXL v4 + IP-Adapter). Capability weights download only when requested. Model files are verified by exact size and SHA-256. Nothing here is committed as a binary.",
   "comfyui": {
     "repo": "https://github.com/Comfy-Org/ComfyUI.git",
     "pin": "12d5279438bfefc058a269eae805ceab6047777f",
@@ -13,6 +13,14 @@
       "pin": "6ea2651e7df66d7585f6ffee804b20e92fb38b8a",
       "required_class_types": ["UnetLoaderGGUF"],
       "license": "Apache-2.0"
+    },
+    {
+      "name": "ComfyUI_IPAdapter_plus",
+      "repo": "https://github.com/cubiq/ComfyUI_IPAdapter_plus.git",
+      "pin": "a0f451a5113cf9becb0847b92884cb10cbdec0ef",
+      "required_class_types": ["IPAdapterModelLoader", "IPAdapterAdvanced"],
+      "license": "MIT",
+      "capability": "adult_explicit"
     }
   ],
   "torch": {
@@ -32,7 +40,33 @@
       "qwen_image_t2i_lightning_8step",
       "qwen_2.5_vl_7b_fp8_scaled",
       "qwen_image_vae"
+    ],
+    "adult_explicit": [
+      "lustify_sdxl_v4",
+      "ip_adapter_plus_sdxl_vith",
+      "clip_vision_vith"
     ]
+  },
+  "model_profiles": {
+    "lustify_sdxl_v4": {
+      "model_id": "lustify_sdxl_v4",
+      "display_name": "LUSTIFY! SDXL v4.0",
+      "provider": "comfyui",
+      "architecture": "sdxl",
+      "intended_use": "local explicit adult photoreal generation for fully adult fictional/synthetic or user-authorized characters",
+      "adult_capable": true,
+      "explicit_adult_profile": true,
+      "recommended_resolution": [832, 1216],
+      "approximate_vram_class": "8gb-sdxl",
+      "workflow_profile": "lustify_sdxl_adult",
+      "capability": "adult_explicit",
+      "model_key": "lustify_sdxl_v4",
+      "identity_method": "ip-adapter-plus-sdxl-vit-h",
+      "source": "https://civitai.com/models/573152 (LUSTIFY! [SDXL NSFW checkpoint] v4.0)",
+      "download_mirror": "https://huggingface.co/KamCastle/lustify4",
+      "license": "CreativeML-OpenRAIL-M",
+      "notes": "Uncensored SDXL fine-tune. Identity comes from 1-2 trusted AICE references via IP-Adapter Plus (ViT-H). Defaults: dpmpp_2m + karras, 30 steps, CFG 5.0, batch 1, ~1 MP buckets. Installed/missing state is computed at runtime from models.capability_missing('adult_explicit')."
+    }
   },
   "models": {
     "qwen_image_edit_2509_gguf_q3km": {
@@ -104,6 +138,36 @@
       "license": "Apache-2.0",
       "vram_class": "small",
       "required": true
+    },
+    "lustify_sdxl_v4": {
+      "filename": "lustifySDXLNSFWSFW_v40.safetensors",
+      "dest_subdir": "checkpoints",
+      "url": "https://huggingface.co/KamCastle/lustify4/resolve/main/lustifySDXLNSFWSFW_v40.safetensors",
+      "size_bytes": 6938042770,
+      "sha256": "844037941775cf4780d40ca484c736ebafafe781273ab79dad6f8c999824919d",
+      "license": "CreativeML-OpenRAIL-M",
+      "vram_class": "8gb-sdxl",
+      "required": false
+    },
+    "ip_adapter_plus_sdxl_vith": {
+      "filename": "ip-adapter-plus_sdxl_vit-h.safetensors",
+      "dest_subdir": "ipadapter",
+      "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter-plus_sdxl_vit-h.safetensors",
+      "size_bytes": 847517512,
+      "sha256": "3f5062b8400c94b7159665b21ba5c62acdcd7682262743d7f2aefedef00e6581",
+      "license": "Apache-2.0",
+      "vram_class": "small",
+      "required": false
+    },
+    "clip_vision_vith": {
+      "filename": "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
+      "dest_subdir": "clip_vision",
+      "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/models/image_encoder/model.safetensors",
+      "size_bytes": 2528373448,
+      "sha256": "6ca9667da1ca9e0b0f75e46bb030f7e011f44f86cbfb8d5a36590fcd7507b030",
+      "license": "Apache-2.0",
+      "vram_class": "cpu-offloaded",
+      "required": false
     }
   }
 }

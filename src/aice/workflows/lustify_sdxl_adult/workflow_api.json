@@ -1,0 +1,67 @@
+{
+  "4": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {"ckpt_name": "lustifySDXLNSFWSFW_v40.safetensors"}
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {"text": "PLACEHOLDER", "clip": ["4", 1]}
+  },
+  "7": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {"text": "", "clip": ["4", 1]}
+  },
+  "5": {
+    "class_type": "EmptyLatentImage",
+    "inputs": {"width": 832, "height": 1216, "batch_size": 1}
+  },
+  "10": {"class_type": "LoadImage", "inputs": {"image": "aice_ref_1.png"}},
+  "11": {"class_type": "LoadImage", "inputs": {"image": "aice_ref_2.png"}},
+  "20": {
+    "class_type": "ImageBatch",
+    "inputs": {"image1": ["10", 0], "image2": ["11", 0]}
+  },
+  "30": {
+    "class_type": "IPAdapterModelLoader",
+    "inputs": {"ipadapter_file": "ip-adapter-plus_sdxl_vit-h.safetensors"}
+  },
+  "31": {
+    "class_type": "CLIPVisionLoader",
+    "inputs": {"clip_name": "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors"}
+  },
+  "32": {
+    "class_type": "IPAdapterAdvanced",
+    "inputs": {
+      "model": ["4", 0],
+      "ipadapter": ["30", 0],
+      "clip_vision": ["31", 0],
+      "image": ["20", 0],
+      "weight": 0.75,
+      "weight_type": "linear",
+      "combine_embeds": "concat",
+      "start_at": 0.0,
+      "end_at": 1.0,
+      "embeds_scaling": "V only"
+    }
+  },
+  "3": {
+    "class_type": "KSampler",
+    "inputs": {
+      "seed": 0,
+      "steps": 30,
+      "cfg": 5.0,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "karras",
+      "denoise": 1.0,
+      "model": ["32", 0],
+      "positive": ["6", 0],
+      "negative": ["7", 0],
+      "latent_image": ["5", 0]
+    }
+  },
+  "8": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["4", 2]}},
+  "9": {
+    "class_type": "SaveImage",
+    "inputs": {"filename_prefix": "AICE", "images": ["8", 0]}
+  }
+}
