@@ -157,7 +157,15 @@ def cmd_promote_ref(args: argparse.Namespace) -> None:
 def cmd_reject_ref(args: argparse.Namespace) -> None:
     home = engine_home(args.home)
     char_dir, _ = load_profile(home, args.character)
-    emit({"ok": True, "reference": reject_reference(char_dir, args.ref_id, args.reason)})
+    emit({
+        "ok": True,
+        "reference": reject_reference(
+            char_dir,
+            args.ref_id,
+            args.reason,
+            user_approved=args.user_approved,
+        ),
+    })
 
 
 def cmd_list_refs(args: argparse.Namespace) -> None:
@@ -214,7 +222,7 @@ def cmd_analysis_set(args: argparse.Namespace) -> None:
     char_dir, _ = load_profile(home, args.character)
     payload = parse_json_arg(args.json)
     if not isinstance(payload, dict):
-        raise ValueError("analysis payload must be an object")
+        raise ValueError("analysis payload must be a JSON object")
     emit({"ok": True, "entry": set_cached_analysis(char_dir, args.ref_id, payload)})
 
 
@@ -411,7 +419,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("refs-done"); p.add_argument("character"); p.set_defaults(func=cmd_refs_done)
     p = sub.add_parser("mark-ready"); p.add_argument("character"); p.set_defaults(func=cmd_mark_ready)
     p = sub.add_parser("promote-ref"); p.add_argument("character"); p.add_argument("ref_id"); p.add_argument("--checks", required=True); p.add_argument("--golden", action="store_true"); p.add_argument("--user-approved", action="store_true"); p.set_defaults(func=cmd_promote_ref)
-    p = sub.add_parser("reject-ref"); p.add_argument("character"); p.add_argument("ref_id"); p.add_argument("--reason", required=True); p.set_defaults(func=cmd_reject_ref)
+    p = sub.add_parser("reject-ref"); p.add_argument("character"); p.add_argument("ref_id"); p.add_argument("--reason", required=True); p.add_argument("--user-approved", action="store_true"); p.set_defaults(func=cmd_reject_ref)
     p = sub.add_parser("list-refs"); p.add_argument("character"); p.add_argument("--tier", choices=["golden", "trusted", "candidate", "rejected"]); p.set_defaults(func=cmd_list_refs)
     p = sub.add_parser("observe"); p.add_argument("character"); p.add_argument("--json", required=True); p.set_defaults(func=cmd_observe)
     p = sub.add_parser("lock-fact"); p.add_argument("character"); p.add_argument("path"); p.add_argument("--value", required=True); p.set_defaults(func=cmd_lock_fact)
