@@ -223,11 +223,19 @@ def _utc() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
-def _tiny_png() -> bytes:
-    # 8x8 grey PNG (enough for a reference-slot upload during smoke)
-    import base64
+def _tiny_png(size: int = 64, grey: int = 127) -> bytes:
+    """A small valid RGB PNG, built with stdlib only (aice core has no Pillow),
+    used as the throwaway reference for the smoke generation."""
+    import struct
+    import zlib
 
-    return base64.b64decode(
-        "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAF0lEQVR4nGP8//8/"
-        "AzJgYkAD1BFgAAB7pAQBmZg2GQAAAABJRU5ErkJggg=="
-    )
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return (struct.pack(">I", len(data)) + tag + data
+                + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF))
+
+    ihdr = struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)  # 8-bit truecolour
+    row = b"\x00" + bytes((grey, grey, grey)) * size
+    return (b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", ihdr)
+            + chunk(b"IDAT", zlib.compress(row * size, 9))
+            + chunk(b"IEND", b""))
