@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 manifest = json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
 pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
 init_text = (ROOT / "src" / "aice" / "__init__.py").read_text(encoding="utf-8")
+readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
 assert manifest["name"] == "ai-char-engine"
 assert manifest["skills"].startswith("./")
@@ -19,8 +20,6 @@ skill = skill_dir / "SKILL.md"
 assert skill.is_file(), skill
 text = skill.read_text(encoding="utf-8")
 assert text.startswith("---\nname: ai-char-engine\n")
-# Product wording evolved from "interactive" to "conversational" in v0.4; both
-# describe the same user-facing contract. Validate the behavior rather than a stale keyword.
 lower = text.casefold()
 assert "interactive" in lower or "conversational" in lower
 assert len(text) < 9000, "SKILL.md should stay compact; move cold-path details to references/"
@@ -45,6 +44,13 @@ assert entry["policy"]["authentication"] == "ON_INSTALL"
 project_version = re.search(r'^version = "([^"]+)"$', pyproject, re.MULTILINE)
 code_version = re.search(r'^__version__ = "([^"]+)"$', init_text, re.MULTILINE)
 assert project_version and code_version
-assert manifest["version"] == project_version.group(1) == code_version.group(1)
+version = manifest["version"]
+assert version == project_version.group(1) == code_version.group(1)
+
+# Prevent the stale-release drift that previously left README on v0.4 while the
+# package/plugin shipped v0.5.
+assert f"Current release: **v{version}**." in readme, "README release must match plugin/package version"
+assert (ROOT / "docs" / "adult-backend.md").is_file()
+assert "capability-specific" in readme.casefold()
 
 print("plugin validation: ok")
