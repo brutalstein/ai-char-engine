@@ -1,92 +1,84 @@
 # Explicit adult profile (local LUSTIFY SDXL)
 
-Load this only when a request is explicit adult synthetic content or the user asks to
-set up the local adult model. The normal user never sees ComfyUI, models, or settings.
+Load this only when a request is explicit adult synthetic content or the user asks to set up the local adult model. The normal user never needs ComfyUI/model/settings details.
 
-## What this is
+## Contract
 
-A dedicated **local** ComfyUI profile for explicit adult imagery of a fully adult,
-synthetic or user-authorized character. It never uses Codex built-in image generation
-and never leaves `127.0.0.1`.
+A dedicated **local** ComfyUI capability renders explicit adult imagery for fully adult synthetic or user-authorized characters. It never uses Codex built-in image generation for the explicit render and never leaves localhost.
 
-- checkpoint: **LUSTIFY! SDXL v4.0** (`lustifySDXLNSFWSFW_v40.safetensors`), SDXL, CreativeML-OpenRAIL-M
-- identity: **IP-Adapter Plus SDXL (ViT-H)** + CLIP-ViT-H, driven by the character's
-  golden/trusted references (1–2 images; more dilutes the identity embedding)
-- workflow profile: `lustify_sdxl_adult` (versioned, under `src/aice/workflows/`)
-- capability key: `adult_explicit`
+- checkpoint: **LUSTIFY! SDXL v4.0**
+- identity: **IP-Adapter Plus SDXL (ViT-H)** + CLIP-ViT-H from 1–2 golden/trusted references
+- workflow: `lustify_sdxl_adult`
+- capability: `adult_explicit`
 
-Character Brain, trust tiers, provenance, selection and validation are unchanged and
-provider-neutral. A LUSTIFY output is a normal generated result: it enters as
-`candidate` and only a separate quality gate / user approval can promote it. LUSTIFY
-never trusts or promotes its own output.
+Character Brain, trust, provenance, selection and validation remain provider-neutral. LUSTIFY output is generated evidence: candidate first, never self-promoted.
 
 ## Routing
 
-`aice generate` runs a compact deterministic intent classifier and sets the request
-explicitness. You route on that result — do not pre-judge:
+`aice generate` classifies explicitness deterministically in English/Turkish:
 
-- `normal` / `suggestive` → ordinary routing (see `comfyui.md`).
-- `explicit` → planner strategy `local-adult`, primary `comfyui`, no cross-provider
-  repair, cross-provider **reference reuse allowed** (a trusted ref made by Codex or
-  the user still conditions LUSTIFY).
-- `disallowed` → the orchestrator returns status `refused` before any provider is
-  touched. Relay the refusal text; never retry or reword.
+- `normal` / `suggestive` -> ordinary routing;
+- `explicit` -> planner `local-adult`, primary ComfyUI, no cross-provider repair;
+- `disallowed` -> `refused` before any provider is touched.
 
-Phrases like "use the local adult model" / "not the built-in generator" also force the
-local profile even when the wording itself is not explicit.
+Phrases such as “use LUSTIFY”, “yerel +18 model”, “image gen kullanma”, and equivalent English wording can explicitly select the local adult route.
 
-### If the profile is not installed
+### `local_adult_unavailable`
 
-Status `local_adult_unavailable` (never a downgrade to cloud). The handoff carries:
+The adult capability is missing **or has not passed its own current smoke validation**. Offer to set it up/repair it or offer a non-explicit alternative, then stop. Never downgrade the explicit render to built-in generation.
+
+Internal setup path:
 
 ```text
 aice comfy setup --capabilities adult_explicit
 aice comfy doctor --smoke
 ```
 
-Tell the user the local adult backend is not ready, offer to set it up, or offer a
-non-explicit version of the image with the standard profile. Then stop.
+### `adult_identity_required`
 
-## Safety scope (do not weaken)
+The LUSTIFY workflow is reference-driven. If the user asks for explicit content while creating the very first character seed, do not send that explicit scratch request to built-in generation or Qwen bootstrap.
 
-Only for fully adult fictional/synthetic characters, or user-owned/authorized adult
-character workflows already supported by the character system. The classifier refuses,
-and you must never work around: minors or young-looking subjects, incest/family sexual
-context, non-consent, sexual violence, real-person sexual deepfakes, hidden-camera or
-voyeuristic sexual content, or otherwise illegal sexual content.
+Instead:
+1. establish a neutral, non-explicit adult identity seed;
+2. show it and get the user's approval so it becomes golden;
+3. retry the original explicit request through the validated local adult capability.
 
-## Setup
+## Validation
+
+v0.5.1 validates local capabilities independently:
 
 ```text
-aice comfy setup --capabilities adult_explicit
-aice comfy doctor --smoke
+identity
+bootstrap
+adult_explicit
 ```
 
-Downloads (~10.3 GB total, one-time, resumable, hash-verified, outside Git under
-`~/.aice/runtime`): LUSTIFY SDXL v4 checkpoint, IP-Adapter Plus SDXL weights,
-CLIP-ViT-H image encoder, and the pinned `ComfyUI_IPAdapter_plus` custom node. Setup is
-idempotent — intact files are reused. Disk preflight includes these before downloading.
+Model presence alone is not readiness. Adult generation is advertised only after the adult model stack/workflow passes its own real smoke execution. Runtime/model changes invalidate affected smoke state until doctor succeeds again.
 
-## 8 GB hardware fit (RTX 5070 Laptop, decided for the user)
+## Setup/storage
 
-One fp16 checkpoint, no quant tiers. Identity comes from IP-Adapter, so the same
-process-global 8 GB server flags as the Qwen path apply (`--lowvram`,
-`--reserve-vram 0.9`, `--cpu-vae`). Priorities: identity > photorealism > reliability > speed.
+The adult-only weights are roughly 10.3 GB incremental when the base identity runtime is already installed. On a fresh setup the required identity stack is also included; installer preflight reports actual missing bytes and headroom.
 
-| knob | default | why |
-|---|---|---|
-| resolution | 832×1216 portrait (square/landscape by scene), ≤1 MP | SDXL native bucket, no tiling on 8 GB |
-| sampler / scheduler | `dpmpp_2m` / `karras` | most reliable SDXL photoreal 2nd-order combo |
-| steps / CFG | 30 / 5.0 | mid of LUSTIFY's 3–7 band; avoids plastic skin |
-| batch | 1 | 8 GB |
-| IP-Adapter weight | 0.75 portrait, 0.72 square, 0.55 full-body/wide | tighter face lock on portraits; body/wardrobe freedom on full-body |
-| references | 1–2 golden/trusted; a lone ref is duplicated for the 2-input batch | more dilutes identity |
-| negative baseline | non-photographic + gross-anatomy + youthful-appearance terms | added automatically; user negative is appended |
+Downloads are resumable and SHA-256 verified. A same-sized corrupt cached model is redownloaded instead of being trusted.
 
-Never ask the user to choose these.
+## 8 GB defaults
+
+| knob | default |
+|---|---|
+| resolution | 832×1216 portrait/full-body; scene-aware square/landscape |
+| sampler / scheduler | `dpmpp_2m` / `karras` |
+| steps / CFG | 30 / 5.0 |
+| batch | 1 |
+| IP-Adapter | 0.75 portrait, 0.72 square, 0.55 full-body/wide |
+| references | 1–2 golden/trusted |
+| runtime | low-VRAM + CPU VAE on the 8 GB profile |
+
+Do not ask the user to tune these in normal conversation.
 
 ## Reproducibility
 
-Each adult result records: `explicit`, model file + sha256, workflow name + hash,
-reference ids/roles/origins, `identity_method`, IP-Adapter file + sha256 + weight,
-CLIP-Vision file, resolution, seed, free VRAM at start.
+Adult results record explicitness, model/workflow hashes, reference IDs/roles/origins, IP-Adapter/CLIP-Vision metadata, seed/settings, free VRAM at start, and output SHA-256.
+
+## Safety scope
+
+Only fully adult fictional/synthetic or user-authorized adult character workflows. Never work around a `refused` result. Disallowed categories are stopped before provider execution.
