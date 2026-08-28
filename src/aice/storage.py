@@ -291,8 +291,9 @@ def register_reference(
     digest = sha256_file(source_path)
     existing = next((r for r in manifest["references"] if r.get("sha256") == digest), None)
     if existing:
-        # Backfill provenance for old manifests when the same bytes are re-registered.
-        if not existing.get("origin_provider") and origin != "unknown":
+        # Backfill provenance only when an old record has no meaningful provider.
+        existing_origin = str(existing.get("origin_provider") or "").strip().casefold()
+        if existing_origin in {"", "unknown"} and origin != "unknown":
             existing["origin_provider"] = origin
             save_manifest(char_dir, manifest)
         return existing
