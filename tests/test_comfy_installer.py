@@ -127,6 +127,7 @@ class InstallerTests(unittest.TestCase):
     def test_exact_pinned_checkout_is_network_noop(self) -> None:
         target = self.root / "repo"
         (target / ".git").mkdir(parents=True)
+        (target / "__init__.py").write_text("x", encoding="utf-8")  # materialized worktree
         calls: list[list[str]] = []
         orig_sha, orig_run = inst._git_sha, inst._run
         inst._git_sha = lambda _p: "a" * 40
@@ -135,6 +136,22 @@ class InstallerTests(unittest.TestCase):
             got = inst._ensure_pinned_repo("https://example.invalid/repo.git", target, "a" * 40)
             self.assertEqual(got, "a" * 40)
             self.assertEqual(calls, [])
+        finally:
+            inst._git_sha, inst._run = orig_sha, orig_run
+
+    def test_pinned_sha_with_empty_worktree_is_repaired(self) -> None:
+        # Regression: a clone whose default HEAD already equalled the pin used to
+        # early-return with a bare .git and no files, breaking the custom node.
+        target = self.root / "repo"
+        (target / ".git").mkdir(parents=True)
+        calls: list[list[str]] = []
+        orig_sha, orig_run = inst._git_sha, inst._run
+        inst._git_sha = lambda _p: "a" * 40
+        inst._run = lambda cmd, **_kw: calls.append(cmd) or ""
+        try:
+            inst._ensure_pinned_repo("https://example.invalid/repo.git", target, "a" * 40)
+            self.assertTrue(any("fetch" in cmd for cmd in calls))
+            self.assertTrue(any("checkout" in cmd for cmd in calls))
         finally:
             inst._git_sha, inst._run = orig_sha, orig_run
 
