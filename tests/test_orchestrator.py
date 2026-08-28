@@ -8,6 +8,7 @@ from aice.brain import add_observations
 from aice.providers import base as pbase
 from aice.providers import orchestrator as orch
 from aice.providers.base import GenerationResult, ProviderCapabilities
+from aice.providers.router import BackendProbe
 from aice.storage import create_character, register_reference, set_backend_preference
 
 
@@ -18,8 +19,6 @@ class _FakeProvider:
         self.seen: pbase.GenerationRequest | None = None
 
     def probe(self):
-        from aice.providers.router import BackendProbe
-
         return BackendProbe(installed=True, configured=True, validated=True,
                             models_present=True, nodes_present=True, server_ok=True,
                             free_vram_mb=6000)
@@ -73,7 +72,14 @@ class OrchestratorTests(unittest.TestCase):
         orch.safe_comfy_probe = lambda: (provider.probe(), provider)
         self.addCleanup(lambda: setattr(orch, "safe_comfy_probe", orig))
 
+    def _patch_unavailable(self):
+        orig = orch.safe_comfy_probe
+        orch.safe_comfy_probe = lambda: (BackendProbe(installed=False), None)
+        self.addCleanup(lambda: setattr(orch, "safe_comfy_probe", orig))
+
     def test_falls_back_to_codex_when_comfy_unavailable(self) -> None:
+        # Never depend on whether the developer machine happens to have ComfyUI.
+        self._patch_unavailable()
         out = orch.plan_and_generate(self.home, "maya-orch", "beach selfie at sunset")
         self.assertEqual(out["backend_effective"], "codex_builtin")
         self.assertEqual(out["result"].status, "planned")
@@ -195,6 +201,17 @@ class SeedPlannerTests(unittest.TestCase):
         out = orch.plan_seed_generation(self.home, "nova", "black hair", backend="comfyui")
         self.assertEqual(out["result"].status, "needs_backend_setup")
         self.assertIn("bootstrap", out["result"].handoff["setup"])
+
+    def test_explicit_scratch_seed_never_routes_to_cloud_or_qwen_bootstrap(self) -> None:
+        fake = _FakeProvider(ok=True, bootstrap=True)
+        self._patch(fake)
+        out = orch.plan_seed_generation(self.home, "nova", "tamamen çıplak +18 karakter")
+        self.assertEqual(out["result"].status, "adult_identity_required")
+        self.assertEqual(out["backend_selected"], "comfyui")
+        self.assertIsNone(out["backend_effective"])
+        self.assertIsNone(fake.seen)
+        self.assertFalse(out["result"].handoff["cloud_explicit_generation"])
+        self.assertTrue(any(x["stage"] == "adult_identity_required" for x in out["trace"]))
 
 
 if __name__ == "__main__":
