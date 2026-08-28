@@ -7,8 +7,9 @@ from ..providers.base import EffectiveSettings
 from .hardware import HardwareProfile
 
 # --- model variants (keys must match comfy/registry.json "models") -----------
-# GGUF quant of Qwen-Image-Edit-2509 (city96 ComfyUI-GGUF) + a fused 8-step
-# Lightning LoRA. Q4_K_S is the default; Q3_K_M is the tight-VRAM fallback.
+# GGUF quantizations of Qwen-Image-Edit-2509. Real 8 GB smoke testing selected
+# Q3_K_M + CPU VAE decode as the safe target-machine default. Q4_K_S remains an
+# optional/tuned model for machines where measured headroom supports it.
 QWEN_EDIT_2509_GGUF_Q4KS = "qwen_image_edit_2509_gguf_q4ks"
 QWEN_EDIT_2509_GGUF_Q3KM = "qwen_image_edit_2509_gguf_q3km"
 
@@ -21,7 +22,7 @@ class ModelSamplerProfile:
     scheduler: str
 
 
-# The Lightning-8-step LoRA is baked into the workflow, so every quant samples the
+# The Lightning-8-step LoRA is part of the workflow, so every quant samples the
 # same way: 8 steps, CFG 1.0 (no true CFG), euler/simple.
 MODEL_SAMPLER: dict[str, ModelSamplerProfile] = {
     QWEN_EDIT_2509_GGUF_Q4KS: ModelSamplerProfile(8, 1.0, "euler", "simple"),
@@ -44,16 +45,15 @@ class HardwarePolicyProfile:
     low_vram_model: str
     server_args: tuple[str, ...]
     vram_floor_mb: int
-    vram_headroom_mb: int  # extra margin over floor before we drop to low_vram_model
+    vram_headroom_mb: int
     max_pixels: int
+    # Reserved for a future workflow that actually implements an upscale pass.
+    # Keep empty today so generation metadata never claims an operation that did not run.
     upscale_budgets: tuple[str, ...]
     usable: bool = True
 
 
 PROFILES: dict[str, HardwarePolicyProfile] = {
-    # RTX 5070 Laptop, 8 GB: Q3_K_M GGUF default, VAE decode forced to CPU (the
-    # GPU decode of a ~1 MP Qwen latent with the text encoder resident overflows
-    # 8 GB and crashes the worker). Q4_K_S stays available for the quality budget.
     "rtx_5070_laptop_8gb": HardwarePolicyProfile(
         name="rtx_5070_laptop_8gb",
         default_model=QWEN_EDIT_2509_GGUF_Q3KM,
@@ -63,7 +63,7 @@ PROFILES: dict[str, HardwarePolicyProfile] = {
         vram_floor_mb=3000,
         vram_headroom_mb=1200,
         max_pixels=1_048_576,
-        upscale_budgets=("quality",),
+        upscale_budgets=(),
     ),
     "blackwell_8gb": HardwarePolicyProfile(
         name="blackwell_8gb",
@@ -74,7 +74,7 @@ PROFILES: dict[str, HardwarePolicyProfile] = {
         vram_floor_mb=3000,
         vram_headroom_mb=1200,
         max_pixels=1_048_576,
-        upscale_budgets=("quality",),
+        upscale_budgets=(),
     ),
     "blackwell_12gb_plus": HardwarePolicyProfile(
         name="blackwell_12gb_plus",
@@ -84,9 +84,8 @@ PROFILES: dict[str, HardwarePolicyProfile] = {
         vram_floor_mb=4000,
         vram_headroom_mb=2000,
         max_pixels=1_500_000,
-        upscale_budgets=("balanced", "quality"),
+        upscale_budgets=(),
     ),
-    # Any other NVIDIA card: same GGUF path (pure-torch dequant, no Blackwell kernels needed).
     "nvidia_generic": HardwarePolicyProfile(
         name="nvidia_generic",
         default_model=QWEN_EDIT_2509_GGUF_Q3KM,
@@ -95,7 +94,7 @@ PROFILES: dict[str, HardwarePolicyProfile] = {
         vram_floor_mb=3400,
         vram_headroom_mb=1400,
         max_pixels=1_048_576,
-        upscale_budgets=("quality",),
+        upscale_budgets=(),
     ),
     "cpu_or_unknown": HardwarePolicyProfile(
         name="cpu_or_unknown",
@@ -164,7 +163,6 @@ def resolve_settings(
         and free_vram_mb < profile.vram_floor_mb + profile.vram_headroom_mb
     )
     use_low = budget == "economy" or tight_vram or ref_count >= 3 and budget != "quality"
-    # A passing smoke/bench may pin a machine-measured default (comfy.json "tuned").
     base_model = tuned_model if tuned_model in MODEL_SAMPLER else profile.default_model
     model_id = profile.low_vram_model if use_low else base_model
     sampler = MODEL_SAMPLER[model_id]
