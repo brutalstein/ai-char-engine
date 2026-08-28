@@ -41,6 +41,13 @@ def coverage_gaps(manifest: dict[str, Any], prompt: str) -> list[str]:
     return [tag for tag in ("face", "full_body", "side", "back") if tag in wanted and tag not in available]
 
 
+def _origin_provider(ref: dict[str, Any]) -> str:
+    origin = str(ref.get("origin_provider", "")).strip().casefold()
+    if origin:
+        return origin
+    return "user" if ref.get("source") == "user_uploaded" else "unknown"
+
+
 def build_context(home: Path, character: str, prompt: str, budget: str = "balanced") -> dict[str, Any]:
     if budget not in BUDGETS:
         raise ValueError(f"Unknown budget: {budget}")
@@ -67,6 +74,9 @@ def build_context(home: Path, character: str, prompt: str, budget: str = "balanc
                 "path": str((char_dir / ref["path"]).resolve()),
                 "role": ref["role"],
                 "tier": ref["tier"],
+                "source": ref.get("source", ""),
+                "origin_provider": _origin_provider(ref),
+                "tags": list(ref.get("tags", [])),
             }
             for ref in refs
         ],
@@ -171,6 +181,7 @@ def bootstrap_plan(home: Path, character: str) -> dict[str, Any]:
             "tags": spec["tags"],
             "anchor_path": str((char_dir / anchor["path"]).resolve()),
             "anchor_id": anchor["id"],
+            "anchor_origin_provider": _origin_provider(anchor),
             "risk": risk,
             "requires_user_approval": approval,
             "prompt": (
@@ -184,5 +195,5 @@ def bootstrap_plan(home: Path, character: str) -> dict[str, Any]:
         "character": profile["id"],
         "missing": tasks,
         "blocked": blocked,
-        "rule": "High-extrapolation anchors require explicit user approval before becoming identity truth.",
+        "rule": "High-extrapolation anchors require explicit user approval before becoming identity truth; provider origin never changes trust.",
     }

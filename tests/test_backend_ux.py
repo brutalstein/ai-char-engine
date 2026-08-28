@@ -34,6 +34,9 @@ class BackendUxTests(unittest.TestCase):
         self.assertTrue(state["needs_user_choice"])
         self.assertEqual({x["value"] for x in state["choices"]},
                          {"auto", "comfyui", "codex_builtin", "ask_each_time"})
+        self.assertTrue(state["auto_is_capability_aware"])
+        auto = next(x for x in state["choices"] if x["value"] == "auto")
+        self.assertIn("intelligently", auto["label"].lower())
 
     def test_ask_each_time_asks_when_both_ready(self) -> None:
         state = backend_dialog("ask_each_time", ready_probe())
@@ -50,10 +53,14 @@ class BackendUxTests(unittest.TestCase):
         self.assertEqual(state["stage"], "backend_attention")
         self.assertTrue(state["needs_user_choice"])
 
-    def test_auto_recommends_local_when_ready(self) -> None:
+    def test_auto_remains_strategy_when_local_ready(self) -> None:
         state = backend_dialog("auto", ready_probe())
         self.assertEqual(state["stage"], "ready")
-        self.assertEqual(state["effective"], "comfyui")
+        self.assertEqual(state["effective"], "auto")
+
+    def test_auto_degrades_to_builtin_when_local_unavailable(self) -> None:
+        state = backend_dialog("auto", BackendProbe(installed=False))
+        self.assertEqual(state["effective"], "codex_builtin")
 
     def test_preference_persists(self) -> None:
         with tempfile.TemporaryDirectory() as td:

@@ -32,6 +32,8 @@ from .utils import append_jsonl, parse_json_arg, sha256_file, utc_now
 from .wizard import guide
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+GENERATION_BACKENDS = ["auto", "hybrid", "comfyui", "codex_builtin"]
+GENERATION_OPERATIONS = ["generate", "reference_expand", "repair"]
 
 
 def emit(payload: Any, pretty: bool = True) -> None:
@@ -81,6 +83,7 @@ def cmd_seed(args: argparse.Namespace) -> None:
         tier="golden",
         tags=tags,
         notes="Primary user-provided identity reference.",
+        origin_provider="user",
     )
     emit({"ok": True, "reference": record})
 
@@ -98,6 +101,7 @@ def cmd_approve_seed(args: argparse.Namespace) -> None:
         tags=tags,
         notes="Initial generated seed explicitly approved by the user.",
         user_approved=True,
+        origin_provider=args.origin_provider,
     )
     emit({"ok": True, "reference": record, "guide": guide(home, args.character)})
 
@@ -116,6 +120,7 @@ def cmd_add_ref(args: argparse.Namespace) -> None:
         tags=tags,
         parent_ids=parents,
         notes=args.notes or "",
+        origin_provider=args.origin_provider,
     )
     emit({"ok": True, "reference": record})
 
@@ -273,12 +278,16 @@ def cmd_stats(args: argparse.Namespace) -> None:
     char_dir, profile = load_profile(home, args.character)
     refs = load_manifest(char_dir).get("references", [])
     tiers: dict[str, int] = {}
+    origins: dict[str, int] = {}
     for ref in refs:
         tiers[ref["tier"]] = tiers.get(ref["tier"], 0) + 1
+        origin = str(ref.get("origin_provider") or ("user" if ref.get("source") == "user_uploaded" else "unknown"))
+        origins[origin] = origins.get(origin, 0) + 1
     brain = brain_summary(load_brain(char_dir))
     emit({
         "character": profile["id"],
         "references": tiers,
+        "reference_origins": origins,
         "resolved_facts": len(brain["evidence"]) - len(brain["conflicts"]),
         "conflicts": len(brain["conflicts"]),
         "onboarding": load_onboarding(char_dir),
@@ -301,14 +310,15 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         "home": str(home),
         "home_writable": True,
         "openai_api_key_required": False,
-        "image_backend": "Interactive choice: local ComfyUI, Codex image generation, or automatic routing",
+        "image_backend": "Interactive choice with capability-aware local ComfyUI, Codex image generation, and automatic hybrid planning",
         "interactive_guide": True,
+        "provider_neutral_character_state": True,
     }
     try:
         from .comfy.cli_ops import backend_health
 
         report["local_image_backend"] = backend_health()
-    except Exception as exc:  # noqa: BLE001 - local backend is optional
+    except Exception as exc:  # noqa: BLE001
         report["local_image_backend"] = {"state": "unavailable", "detail": str(exc)}
     emit(report)
 
@@ -320,13 +330,12 @@ def cmd_backend(args: argparse.Namespace) -> None:
     if args.backend_action == "status":
         emit(backend_status(home, args.character))
         return
-
     char_dir, profile = load_profile(home, args.character)
     if args.backend_action == "set":
         prefs = set_backend_preference(char_dir, profile, args.preference)
     elif args.backend_action == "reset":
         prefs = set_backend_preference(char_dir, profile, "unset")
-    else:  # pragma: no cover - argparse enforces actions
+    else:  # pragma: no cover
         raise ValueError(f"unknown backend action: {args.backend_action}")
     emit({"ok": True, "preferences": prefs, "guide": guide(home, args.character)})
 
@@ -335,9 +344,33 @@ def _progress_to_stderr(event: dict[str, Any]) -> None:
     print(json.dumps({"aice_progress": event}, ensure_ascii=False), file=sys.stderr, flush=True)
 
 
-def _run_generation(args: argparse.Namespace, *, backend: str | None) -> None:
-    from .providers.orchestrator import plan_and_generate, result_ledger_row
+def _generation_payload(out: dict[str, Any], *, with_context: bool) -> dict[str, Any]:
+    from .providers.orchestrator import result_ledger_row
 
+    result = out["result"]
+    return {
+        "ok": result.status in {"ok", "planned"},
+        "needs_backend_choice": result.status == "needs_backend_choice",
+        "needs_backend_setup": result.status == "needs_backend_setup",
+        "backend_selected": out.get("backend_selected"),
+        "backend_effective": out.get("backend_effective"),
+        "status": result.status,
+        "output_path": str(result.output_path) if result.output_path else None,
+        "result": result.to_json(),
+        "ledger": result_ledger_row(result),
+        "backend_dialog": out.get("backend_dialog"),
+        "trace": out.get("trace", []),
+        "context": out.get("context") if with_context else None,
+    }
+
+
+def _run_generation(args: argparse.Namespace, *, backend: str | None) -> None:
+    from .providers.orchestrator import plan_and_generate
+
+    repair_of = _image(args.repair_of) if getattr(args, "repair_of", "") else None
+    operation = getattr(args, "operation", "generate")
+    if operation == "repair" and repair_of is None:
+        raise ValueError("repair operation requires --repair-of IMAGE")
     out = plan_and_generate(
         engine_home(args.home),
         args.character,
@@ -345,28 +378,32 @@ def _run_generation(args: argparse.Namespace, *, backend: str | None) -> None:
         budget=args.budget,
         backend=backend,
         seed=args.seed,
-        out_dir=Path(args.out) if args.out else None,
+        out_dir=Path(args.out).expanduser().resolve() if args.out else None,
+        operation=operation,
+        repair_of=repair_of,
         progress=_progress_to_stderr if getattr(args, "progress", False) else None,
     )
-    result = out["result"]
-    emit({
-        "ok": result.status in {"ok", "planned"},
-        "needs_backend_choice": result.status == "needs_backend_choice",
-        "backend_selected": out["backend_selected"],
-        "backend_effective": out["backend_effective"],
-        "status": result.status,
-        "output_path": str(result.output_path) if result.output_path else None,
-        "result": result.to_json(),
-        "ledger": result_ledger_row(result),
-        "backend_dialog": out.get("backend_dialog"),
-        "trace": out.get("trace", []),
-        "context": out["context"] if args.with_context else None,
-    })
+    emit(_generation_payload(out, with_context=args.with_context))
 
 
 def cmd_generate(args: argparse.Namespace) -> None:
-    # None means "honor the character's saved conversational preference".
     _run_generation(args, backend=args.backend)
+
+
+def cmd_seed_generate(args: argparse.Namespace) -> None:
+    from .providers.orchestrator import plan_seed_generation
+
+    out = plan_seed_generation(
+        engine_home(args.home),
+        args.character,
+        args.description,
+        budget=args.budget,
+        backend=args.backend,
+        seed=args.seed,
+        out_dir=Path(args.out).expanduser().resolve() if args.out else None,
+        progress=_progress_to_stderr if args.progress else None,
+    )
+    emit(_generation_payload(out, with_context=False))
 
 
 def cmd_comfy(args: argparse.Namespace) -> None:
@@ -379,16 +416,15 @@ def cmd_comfy(args: argparse.Namespace) -> None:
         emit(cli_ops.doctor(smoke=args.smoke))
     elif action == "setup":
         keys = [k.strip() for k in args.models.split(",") if k.strip()] if args.models else None
-        emit(cli_ops.setup(model_keys=keys))
+        caps = [k.strip() for k in args.capabilities.split(",") if k.strip()] if args.capabilities else None
+        emit(cli_ops.setup(model_keys=keys, capabilities=caps))
     elif action == "start":
         emit(cli_ops.start())
     elif action == "stop":
         emit(cli_ops.stop())
     elif action == "generate":
-        # Compatibility alias for older skill revisions. The main skill uses
-        # top-level `aice generate`; this alias keeps explicit auto routing.
         _run_generation(args, backend=args.backend)
-    else:  # pragma: no cover - argparse enforces choices
+    else:  # pragma: no cover
         raise ValueError(f"unknown comfy action: {action}")
 
 
@@ -396,7 +432,9 @@ def _add_generation_args(parser: argparse.ArgumentParser, *, backend_default: st
     parser.add_argument("character")
     parser.add_argument("prompt")
     parser.add_argument("--budget", choices=["economy", "balanced", "quality"], default="balanced")
-    parser.add_argument("--backend", choices=["auto", "comfyui", "codex_builtin"], default=backend_default)
+    parser.add_argument("--backend", choices=GENERATION_BACKENDS, default=backend_default)
+    parser.add_argument("--operation", choices=GENERATION_OPERATIONS, default="generate")
+    parser.add_argument("--repair-of", default="")
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--out", default="")
     parser.add_argument("--with-context", action="store_true")
@@ -414,8 +452,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("characters"); p.set_defaults(func=cmd_characters)
     p = sub.add_parser("guide"); p.add_argument("character", nargs="?"); p.set_defaults(func=cmd_guide)
     p = sub.add_parser("seed"); p.add_argument("character"); p.add_argument("image"); p.add_argument("--tags", default="face,front"); p.set_defaults(func=cmd_seed)
-    p = sub.add_parser("approve-seed"); p.add_argument("character"); p.add_argument("image"); p.add_argument("--tags", default="face,front,upper_body"); p.set_defaults(func=cmd_approve_seed)
-    p = sub.add_parser("add-ref"); p.add_argument("character"); p.add_argument("image"); p.add_argument("--role", required=True); p.add_argument("--source", choices=["user_uploaded", "generated"], default="user_uploaded"); p.add_argument("--tier", choices=["golden", "trusted", "candidate", "rejected"], default="golden"); p.add_argument("--tags", default=""); p.add_argument("--parents", default=""); p.add_argument("--notes", default=""); p.set_defaults(func=cmd_add_ref)
+    p = sub.add_parser("approve-seed"); p.add_argument("character"); p.add_argument("image"); p.add_argument("--tags", default="face,front,upper_body"); p.add_argument("--origin-provider", choices=["codex_builtin", "comfyui", "unknown"], default="unknown"); p.set_defaults(func=cmd_approve_seed)
+    p = sub.add_parser("seed-generate", help="plan/create a first no-reference identity seed")
+    p.add_argument("character"); p.add_argument("description"); p.add_argument("--budget", choices=["economy", "balanced", "quality"], default="balanced"); p.add_argument("--backend", choices=GENERATION_BACKENDS, default=None); p.add_argument("--seed", type=int, default=None); p.add_argument("--out", default=""); p.add_argument("--progress", action="store_true"); p.set_defaults(func=cmd_seed_generate)
+    p = sub.add_parser("add-ref"); p.add_argument("character"); p.add_argument("image"); p.add_argument("--role", required=True); p.add_argument("--source", choices=["user_uploaded", "generated"], default="user_uploaded"); p.add_argument("--tier", choices=["golden", "trusted", "candidate", "rejected"], default="golden"); p.add_argument("--tags", default=""); p.add_argument("--parents", default=""); p.add_argument("--notes", default=""); p.add_argument("--origin-provider", choices=["user", "codex_builtin", "comfyui", "unknown"], default=None); p.set_defaults(func=cmd_add_ref)
     p = sub.add_parser("refs-done"); p.add_argument("character"); p.set_defaults(func=cmd_refs_done)
     p = sub.add_parser("mark-ready"); p.add_argument("character"); p.set_defaults(func=cmd_mark_ready)
     p = sub.add_parser("promote-ref"); p.add_argument("character"); p.add_argument("ref_id"); p.add_argument("--checks", required=True); p.add_argument("--golden", action="store_true"); p.add_argument("--user-approved", action="store_true"); p.set_defaults(func=cmd_promote_ref)
@@ -440,7 +480,7 @@ def build_parser() -> argparse.ArgumentParser:
     bs = bsub.add_parser("set"); bs.add_argument("character"); bs.add_argument("preference", choices=["auto", "comfyui", "codex_builtin", "ask_each_time"]); bs.set_defaults(func=cmd_backend)
     bs = bsub.add_parser("reset"); bs.add_argument("character"); bs.set_defaults(func=cmd_backend)
 
-    g = sub.add_parser("generate", help="compile, route and generate an image (Codex-invoked)")
+    g = sub.add_parser("generate", help="compile, plan and generate an image")
     _add_generation_args(g, backend_default=None)
     g.set_defaults(func=cmd_generate)
 
@@ -448,7 +488,7 @@ def build_parser() -> argparse.ArgumentParser:
     csub = c.add_subparsers(dest="comfy_action", required=True)
     csub.add_parser("status").set_defaults(func=cmd_comfy)
     cd = csub.add_parser("doctor"); cd.add_argument("--smoke", action="store_true"); cd.set_defaults(func=cmd_comfy)
-    cs = csub.add_parser("setup"); cs.add_argument("--models", default=""); cs.set_defaults(func=cmd_comfy)
+    cs = csub.add_parser("setup"); cs.add_argument("--models", default=""); cs.add_argument("--capabilities", default=""); cs.set_defaults(func=cmd_comfy)
     csub.add_parser("start").set_defaults(func=cmd_comfy)
     csub.add_parser("stop").set_defaults(func=cmd_comfy)
     cg = csub.add_parser("generate")

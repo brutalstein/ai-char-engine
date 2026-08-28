@@ -1,7 +1,4 @@
-"""Thin operations behind `aice comfy <action>` and the doctor backend section.
-
-Codex invokes these; end users never type them.
-"""
+"""Thin operations behind `aice comfy <action>` and doctor diagnostics."""
 from __future__ import annotations
 
 import sys
@@ -21,16 +18,16 @@ def _hw() -> hwmod.HardwareProfile:
 
 
 def backend_health() -> dict[str, Any]:
-    """Non-fatal local-image-backend section for `aice doctor`."""
     cfg = cfgmod.load_config()
     rt = ComfyRuntime(cfg)
     hw = _hw()
     profile = policymod.profile_for(hw)
     installed = rt.is_installed()
-    missing = modelmod.missing_required(rt.models_dir) if installed else None
+    identity_missing = modelmod.capability_missing(rt.models_dir, "identity") if installed else None
+    bootstrap_missing = modelmod.capability_missing(rt.models_dir, "bootstrap") if installed else None
     if not installed:
         state = "unavailable"
-    elif missing or not cfg.get("validated"):
+    elif identity_missing or not cfg.get("validated"):
         state = "degraded"
     else:
         state = "available"
@@ -43,7 +40,12 @@ def backend_health() -> dict[str, Any]:
         "is_blackwell": hw.is_blackwell,
         "hardware_profile": profile.name,
         "default_model": profile.default_model,
-        "missing_models": missing,
+        "missing_models": identity_missing,
+        "capabilities": {
+            "identity": installed and not bool(identity_missing) and bool(cfg.get("validated")),
+            "bootstrap": installed and not bool(bootstrap_missing) and bool(cfg.get("validated")),
+            "bootstrap_missing": bootstrap_missing,
+        },
         "runtime_dir": str(rt.runtime_dir),
         "url": rt.base_url,
     }
@@ -52,9 +54,14 @@ def backend_health() -> dict[str, Any]:
 def status() -> dict[str, Any]:
     cfg = cfgmod.load_config()
     rt = ComfyRuntime(cfg)
-    return {"config": cfgmod.config_path().as_posix(), "pins": cfg.get("pins", {}),
-            "profile": cfg.get("profile"), "validated": cfg.get("validated", False),
-            **rt.status()}
+    return {
+        "config": cfgmod.config_path().as_posix(),
+        "pins": cfg.get("pins", {}),
+        "profile": cfg.get("profile"),
+        "validated": cfg.get("validated", False),
+        "capabilities": backend_health().get("capabilities", {}),
+        **rt.status(),
+    }
 
 
 def start() -> dict[str, Any]:
@@ -66,7 +73,12 @@ def stop() -> dict[str, Any]:
     return {"stopped": ComfyRuntime().stop()}
 
 
-def setup(*, model_keys: list[str] | None = None, verbose: bool = True) -> dict[str, Any]:
+def setup(
+    *,
+    model_keys: list[str] | None = None,
+    capabilities: list[str] | None = None,
+    verbose: bool = True,
+) -> dict[str, Any]:
     log = (lambda m: print(m, file=sys.stderr)) if verbose else None
 
     def mp(key: str, done: int, total: int) -> None:
@@ -74,14 +86,29 @@ def setup(*, model_keys: list[str] | None = None, verbose: bool = True) -> dict[
             pct = 100 * done // total if total else 0
             print(f"  {key}: {pct}% ({done // (1024*1024)}/{total // (1024*1024)} MB)", file=sys.stderr)
 
+    registry = modelmod.load_registry()
+    specs = modelmod.model_specs(registry)
+    # Any additive setup request keeps the required identity stack intact. Optional
+    # capabilities extend it; they never accidentally replace the normal runtime.
+    if model_keys is not None or capabilities:
+        expanded: list[str] = [k for k, spec in specs.items() if spec.required]
+        expanded.extend(model_keys or [])
+        for capability in capabilities or []:
+            keys = modelmod.capability_model_keys(capability, registry)
+            if not keys:
+                return {"ok": False, "error": f"unknown ComfyUI capability: {capability}"}
+            expanded.extend(keys)
+        model_keys = list(dict.fromkeys(expanded))
+
     try:
-        return ComfyInstaller().setup(model_keys=model_keys, log=log, model_progress=mp)
-    except InstallError as exc:
+        report = ComfyInstaller().setup(model_keys=model_keys, log=log, model_progress=mp)
+        report["capabilities"] = backend_health().get("capabilities", {})
+        return report
+    except (InstallError, OSError, KeyError) as exc:
         return {"ok": False, "error": str(exc)}
 
 
 def doctor(*, smoke: bool = False) -> dict[str, Any]:
-    """Strict backend diagnostics; optional real GPU smoke test."""
     cfg = cfgmod.load_config()
     rt = ComfyRuntime(cfg)
     hw = _hw()
@@ -100,18 +127,22 @@ def doctor(*, smoke: bool = False) -> dict[str, Any]:
     inst = ComfyInstaller(cfg)
     ts = inst.torch_status()
     check("torch_cuda", bool(ts.get("cuda")), f"{ts.get('v', '?')} cuda={ts.get('cuda', '?')} avail={ts.get('avail')}")
-    report["blackwell"] = hw.is_blackwell  # informational: GGUF runs on any NVIDIA
-    missing = modelmod.missing_required(rt.models_dir) if rt.is_installed() else ["*"]
+    report["blackwell"] = hw.is_blackwell
+    missing = modelmod.capability_missing(rt.models_dir, "identity") if rt.is_installed() else ["*"]
     check("required_models", not missing, ", ".join(missing) if missing else "present")
     check("localhost_only", rt.host == "127.0.0.1", rt.base_url)
 
     if rt.is_installed() and rt.health(timeout=3):
         try:
             keys = rt.client().object_info_keys()
-            wf = WorkflowAdapter("qwen_edit_identity")
-            wf.validate(keys)
-            check("workflow_nodes", True, f"v{wf.version}")
-        except (WorkflowError, Exception) as exc:  # noqa: BLE001
+            identity = WorkflowAdapter("qwen_edit_identity")
+            identity.validate(keys)
+            check("identity_workflow_nodes", True, f"v{identity.version}")
+            if modelmod.capability_ready(rt.models_dir, "bootstrap"):
+                bootstrap = WorkflowAdapter("qwen_text_to_image")
+                bootstrap.validate(keys)
+                check("bootstrap_workflow_nodes", True, f"v{bootstrap.version}")
+        except Exception as exc:  # noqa: BLE001
             check("workflow_nodes", False, str(exc))
 
     if smoke:
@@ -120,23 +151,19 @@ def doctor(*, smoke: bool = False) -> dict[str, Any]:
         cfg["smoke"] = report["smoke"]
         winner = report["smoke"].get("winner")
         if winner:
-            cfg["tuned"] = {"default_model": winner,
-                            "measured_at": report["smoke"].get("at")}
+            cfg["tuned"] = {"default_model": winner, "measured_at": report["smoke"].get("at")}
         cfgmod.save_config(cfg)
+        report["backend"] = backend_health()
 
     report["checks"] = checks
     report["ok"] = all(c["ok"] for c in checks)
     return report
 
 
-# Cold-start ceiling: first gen pays model load + CPU-offload staging. Warm gens
-# on a kept-alive server are far quicker; past this the default is not viable here.
 _SMOKE_LATENCY_CEILING_S = 420.0
 
 
 def _smoke_test(rt: ComfyRuntime, hw: hwmod.HardwareProfile) -> dict[str, Any]:
-    """Real GPU generation + a bounded auto-tune: run the profile default, and if
-    it fails or is too slow, try the tight-VRAM model. Records both, picks a winner."""
     import tempfile
     import time
     from pathlib import Path
@@ -151,7 +178,6 @@ def _smoke_test(rt: ComfyRuntime, hw: hwmod.HardwareProfile) -> dict[str, Any]:
 
     attempts: dict[str, Any] = {}
     winner: str | None = None
-
     specs = modelmod.model_specs()
     with tempfile.TemporaryDirectory() as td:
         ref = Path(td) / "smoke_ref.png"
@@ -164,22 +190,27 @@ def _smoke_test(rt: ComfyRuntime, hw: hwmod.HardwareProfile) -> dict[str, Any]:
                 continue
             out = Path(td) / f"out_{key}"
             req = GenerationRequest(
-                character="smoke", prompt="a natural candid photo of a person, soft daylight",
-                reference_paths=(ref,), aspect="portrait", budget="balanced", seed=1234,
+                character="smoke",
+                prompt="a natural candid photo of a person, soft daylight",
+                reference_paths=(ref,),
+                aspect="portrait",
+                budget="balanced",
+                seed=1234,
                 out_dir=out,
             )
             t0 = time.monotonic()
             try:
-                cfg = cfgmod.load_config()
-                cfg["tuned"] = {"default_model": key}  # force this candidate for the run
-                result = ComfyUIProvider(config=cfg, hardware=hw).generate(req)
+                local_cfg = cfgmod.load_config()
+                local_cfg["tuned"] = {"default_model": key}
+                result = ComfyUIProvider(config=local_cfg, hardware=hw).generate(req)
                 dt = round(time.monotonic() - t0, 1)
                 ok = result.status == "ok" and result.output_path is not None
                 attempts[key] = {
-                    "ok": ok, "status": result.status, "error": result.error,
+                    "ok": ok,
+                    "status": result.status,
+                    "error": result.error,
                     "duration_s": dt,
-                    "resolution": [result.effective_settings.get("width"),
-                                   result.effective_settings.get("height")],
+                    "resolution": [result.effective_settings.get("width"), result.effective_settings.get("height")],
                     "output_bytes": (result.output_path.stat().st_size
                                      if result.output_path and result.output_path.exists() else 0),
                 }
@@ -195,9 +226,9 @@ def _smoke_test(rt: ComfyRuntime, hw: hwmod.HardwareProfile) -> dict[str, Any]:
             a = attempts[key]
             if a["ok"] and a["duration_s"] <= _SMOKE_LATENCY_CEILING_S:
                 winner = key
-                break  # default (or first) is good enough; no need to try smaller
+                break
 
-    if winner is None:  # nothing beat the ceiling; take the fastest that made an image
+    if winner is None:
         made = [(a["duration_s"], k) for k, a in attempts.items() if a["ok"]]
         winner = min(made)[1] if made else None
 
@@ -226,8 +257,6 @@ def _utc() -> str:
 
 
 def _tiny_png(size: int = 64, grey: int = 127) -> bytes:
-    """A small valid RGB PNG, built with stdlib only (aice core has no Pillow),
-    used as the throwaway reference for the smoke generation."""
     import struct
     import zlib
 
@@ -235,7 +264,7 @@ def _tiny_png(size: int = 64, grey: int = 127) -> bytes:
         return (struct.pack(">I", len(data)) + tag + data
                 + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF))
 
-    ihdr = struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)  # 8-bit truecolour
+    ihdr = struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)
     row = b"\x00" + bytes((grey, grey, grey)) * size
     return (b"\x89PNG\r\n\x1a\n"
             + chunk(b"IHDR", ihdr)

@@ -49,6 +49,26 @@ def model_specs(registry: dict[str, Any] | None = None) -> dict[str, ModelSpec]:
     return out
 
 
+def capability_model_keys(capability: str, registry: dict[str, Any] | None = None) -> list[str]:
+    reg = registry or load_registry()
+    keys = reg.get("capability_models", {}).get(capability, [])
+    return [str(k) for k in keys]
+
+
+def capability_missing(models_dir: Path, capability: str,
+                       registry: dict[str, Any] | None = None) -> list[str]:
+    reg = registry or load_registry()
+    specs = model_specs(reg)
+    keys = capability_model_keys(capability, reg)
+    return [key for key in keys if key not in specs or not verify(specs[key].dest(models_dir), specs[key])[0]]
+
+
+def capability_ready(models_dir: Path, capability: str,
+                     registry: dict[str, Any] | None = None) -> bool:
+    keys = capability_model_keys(capability, registry)
+    return bool(keys) and not capability_missing(models_dir, capability, registry)
+
+
 def sha256_file(path: Path, chunk: int = 4 * 1024 * 1024) -> str:
     h = hashlib.sha256()
     with path.open("rb") as fh:
@@ -113,7 +133,7 @@ def download(
     for attempt in range(1, attempts + 1):
         have = part.stat().st_size if (resume and part.exists()) else 0
         if have and spec.size_bytes and have >= spec.size_bytes:
-            part.unlink()  # corrupt/overlong partial
+            part.unlink()
             have = 0
         req = urllib.request.Request(spec.url, headers={"User-Agent": "aice-comfy/1"})
         if have:
@@ -121,7 +141,7 @@ def download(
         try:
             with urllib.request.urlopen(req, timeout=60) as resp:
                 mode = "ab" if have else "wb"
-                if have and resp.status != 206:  # server ignored Range
+                if have and resp.status != 206:
                     have, mode = 0, "wb"
                 total = spec.size_bytes or (int(resp.headers.get("Content-Length", 0)) + have)
                 done = have
@@ -136,14 +156,13 @@ def download(
                             progress(done, total)
             if not total or done >= total:
                 break
-            # short read: server closed the stream early, no exception raised
             if attempt == attempts:
-                break  # let the size check below report it
-            time.sleep(3 * attempt)  # resume from the partial next loop
+                break
+            time.sleep(3 * attempt)
         except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as exc:
             if attempt == attempts:
                 raise OSError(f"{spec.filename}: download failed after {attempts} tries ({exc})") from None
-            time.sleep(3 * attempt)  # resume from the partial next loop
+            time.sleep(3 * attempt)
 
     if spec.size_bytes and part.stat().st_size != spec.size_bytes:
         raise OSError(f"{spec.filename}: downloaded {part.stat().st_size} != {spec.size_bytes}")

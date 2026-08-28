@@ -14,9 +14,11 @@ class WorkflowError(RuntimeError):
 
 
 class WorkflowAdapter:
-    """Loads a versioned API-format graph + its semantic slot map, validates it against
-    the live node registry, and patches *only* named slots. Node ids never leak into
-    calling code."""
+    """Versioned API graph + semantic slots.
+
+    Calling code never depends on node ids. Profiles may represent reference-driven
+    edit workflows or no-reference bootstrap workflows with the same adapter.
+    """
 
     def __init__(self, name: str = "qwen_edit_identity"):
         base = _ASSET_ROOT / name
@@ -31,11 +33,14 @@ class WorkflowAdapter:
     def version(self) -> str:
         return str(self.profile.get("version", "0"))
 
+    @property
+    def requires_references(self) -> bool:
+        return bool(self.profile.get("requires_references", bool(self.profile.get("reference_slots"))))
+
     def workflow_hash(self) -> str:
         blob = json.dumps(self.graph, sort_keys=True).encode()
         return hashlib.sha256(blob).hexdigest()[:16]
 
-    # -- validation ---------------------------------------------------
     def missing_nodes(self, object_info_keys: set[str]) -> list[str]:
         required = set(self.profile.get("required_class_types", []))
         present_in_graph = {n["class_type"] for n in self.graph.values()}
@@ -51,7 +56,6 @@ class WorkflowAdapter:
                 "Run `aice comfy setup` to install/repair custom nodes."
             )
 
-    # -- rendering --------------------------------------------------
     def render(
         self,
         *,
@@ -65,22 +69,34 @@ class WorkflowAdapter:
         cfg: float,
         sampler: str,
         scheduler: str,
-        reference_names: list[str],
+        reference_names: list[str] | None = None,
+        lora_name: str | None = None,
         output_prefix: str = "AICE",
     ) -> dict[str, Any]:
-        if not reference_names:
-            raise WorkflowError("identity workflow requires at least one reference image")
-        graph = copy.deepcopy(self.graph)
-        slots = self.profile["slots"]
-        ref_slots = self.profile["reference_slots"]
-        enc_nodes = self.profile["text_encoder_nodes"]
+        reference_names = list(reference_names or [])
+        if self.requires_references and not reference_names:
+            raise WorkflowError(f"workflow {self.name} requires at least one reference image")
 
-        values = {
-            "model_path": model_path, "positive_prompt": positive, "negative_prompt": negative,
-            "width": int(width), "height": int(height), "seed": int(seed), "steps": int(steps),
-            "cfg": float(cfg), "sampler": sampler, "scheduler": scheduler,
+        graph = copy.deepcopy(self.graph)
+        slots = self.profile.get("slots", {})
+        ref_slots = self.profile.get("reference_slots", [])
+        enc_nodes = self.profile.get("text_encoder_nodes", [])
+        values: dict[str, Any] = {
+            "model_path": model_path,
+            "positive_prompt": positive,
+            "negative_prompt": negative,
+            "width": int(width),
+            "height": int(height),
+            "seed": int(seed),
+            "steps": int(steps),
+            "cfg": float(cfg),
+            "sampler": sampler,
+            "scheduler": scheduler,
             "output_prefix": output_prefix,
         }
+        if lora_name is not None:
+            values["lora_name"] = lora_name
+
         for key, value in values.items():
             spec = slots.get(key)
             if not spec:
@@ -98,5 +114,6 @@ class WorkflowAdapter:
                 graph.pop(slot["load"], None)
                 graph.pop(slot["scale"], None)
                 for enc in enc_nodes:
-                    graph[enc]["inputs"].pop(slot["enc_input"], None)
+                    if enc in graph:
+                        graph[enc]["inputs"].pop(slot["enc_input"], None)
         return graph

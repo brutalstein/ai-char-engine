@@ -1,6 +1,7 @@
-"""Glue between the Character Brain (engine/selector) and image providers.
+"""Glue between Character Brain state and pixel providers.
 
-The orchestrator owns backend choice/fallback semantics, but never visual judgement.
+v0.4 makes provider choice capability-aware and permits bounded cross-provider help
+without ever letting a provider own character truth or reference trust.
 """
 from __future__ import annotations
 
@@ -10,26 +11,165 @@ from typing import Any
 from ..engine import build_context, render_generation_prompt
 from ..selector import infer_tags
 from ..storage import get_backend_preference, load_profile
-from .base import GenerationRequest, GenerationResult, ProgressCallback
+from .base import GenerationRequest, GenerationResult, ProgressCallback, ReferenceInput
 from .codex_builtin import CodexBuiltinProvider
-from .router import select_backend
+from .planner import build_plan
+from .router import comfy_ready
 from .ux import backend_dialog, safe_comfy_probe
 
 
 def _aspect_from_tags(tags: set[str]) -> str:
     if {"full_body", "legs"} & tags:
         return "full_body"
+    if "profile_picture" in tags:
+        return "square"
     return "portrait"
 
 
 def _preference_mode(preference: str, dialog: dict[str, Any]) -> str | None:
     if dialog.get("needs_user_choice"):
         return None
-    if preference == "auto":
-        return "auto"
-    if preference in {"comfyui", "codex_builtin"}:
+    if preference in {"auto", "hybrid", "comfyui", "codex_builtin"}:
         return preference
     return str(dialog.get("effective") or "codex_builtin")
+
+
+def _reference_origin(row: dict[str, Any]) -> str:
+    explicit = str(row.get("origin_provider", "")).strip()
+    if explicit:
+        return explicit
+    source = str(row.get("source", ""))
+    return "user" if source == "user_uploaded" else "unknown"
+
+
+def _request_from_context(
+    context: dict[str, Any],
+    request_text: str,
+    *,
+    budget: str,
+    seed: int | None,
+    out_dir: Path | None,
+    operation: str,
+    repair_of: Path | None,
+) -> GenerationRequest:
+    tags = infer_tags(request_text)
+    ref_rows = context.get("references", [])
+    refs = tuple(ReferenceInput(
+        id=str(row.get("id", "")),
+        path=Path(row["path"]),
+        role=str(row.get("role", "")),
+        tier=str(row.get("tier", "")),
+        origin_provider=_reference_origin(row),
+        tags=tuple(str(x) for x in row.get("tags", [])),
+    ) for row in ref_rows)
+    details = tuple(
+        f"{d.get('kind', 'feature')} at {d.get('location', '')}: {d.get('description', '')}"
+        for d in context.get("visible_permanent_details", [])
+    )
+    return GenerationRequest(
+        character=context["character"],
+        prompt=render_generation_prompt(context),
+        references=refs,
+        visible_permanent_details=details,
+        scene_tags=tuple(sorted(tags)),
+        aspect=_aspect_from_tags(tags),
+        budget=budget,
+        operation=operation,
+        seed=seed,
+        repair_of=repair_of,
+        out_dir=out_dir,
+    )
+
+
+def _seed_request(
+    character: str,
+    description: str,
+    *,
+    budget: str,
+    seed: int | None,
+    out_dir: Path | None,
+) -> GenerationRequest:
+    prompt = "\n".join([
+        "Use case: photorealistic-natural identity seed for a persistent virtual creator.",
+        f"Character description: {description.strip()}",
+        "Create one original adult synthetic person from scratch. Establish a clear, recognizable, realistic identity that can be reused as a future reference.",
+        "Natural skin texture and anatomy; neutral-to-relaxed expression; uncluttered photography; no celebrity likeness, no text, no watermark.",
+        "Do not invent permanent tattoos, scars, jewelry, or marks unless the description explicitly requests them.",
+    ])
+    tags = infer_tags(description)
+    return GenerationRequest(
+        character=character,
+        prompt=prompt,
+        references=(),
+        scene_tags=tuple(sorted(tags)),
+        aspect=_aspect_from_tags(tags),
+        budget=budget,
+        operation="bootstrap",
+        seed=seed,
+        out_dir=out_dir,
+    )
+
+
+def _execute(
+    req: GenerationRequest,
+    *,
+    preference: str,
+    mode: str,
+    probe: Any,
+    provider: Any | None,
+    report,
+) -> GenerationResult:
+    builtin = CodexBuiltinProvider()
+    local_ready, _ = comfy_ready(probe)
+    local_ready = bool(local_ready and provider is not None)
+    local_request_ready = False
+    local_caps = provider.capabilities() if provider is not None else None
+    if provider is not None and local_ready:
+        local_request_ready = bool(provider.available_for(req)[0])
+    if local_caps is None:
+        from .base import ProviderCapabilities
+        local_caps = ProviderCapabilities(provider="comfyui", local=True, privacy="localhost_only")
+
+    plan = build_plan(
+        mode,
+        req,
+        local_ready=local_ready,
+        local_request_ready=local_request_ready,
+        local_caps=local_caps,
+        builtin_caps=builtin.capabilities(),
+    )
+    chosen = plan.primary_provider
+    report({
+        "stage": "plan_resolved",
+        "strategy": plan.strategy,
+        "operation": req.operation,
+        "backend": chosen,
+        "hybrid": plan.allow_cross_provider_repair or len(plan.stages) > 1,
+    })
+    report({"stage": "backend_selected", "requested": mode, "backend": chosen})
+
+    if chosen == "comfyui":
+        if provider is None or not local_request_ready:
+            result = GenerationResult(
+                backend="comfyui",
+                status="failed",
+                error="Local ComfyUI was selected but is not ready for this operation.",
+            )
+        else:
+            result = provider.generate(req, progress=report)
+        if result.status == "failed" and mode in {"auto", "hybrid"}:
+            report({"stage": "fallback_planned", "from": "comfyui", "to": "codex_builtin"})
+            fallback = builtin.generate(req, progress=report)
+            fallback.warnings.insert(0, f"comfyui failed ({result.error}); planned built-in fallback")
+            result = fallback
+    else:
+        result = builtin.generate(req, progress=report)
+
+    result.plan = plan.as_dict()
+    result.reproducibility.setdefault("strategy", plan.strategy)
+    result.reproducibility.setdefault("requested_mode", mode)
+    result.reproducibility.setdefault("saved_preference", preference)
+    return result
 
 
 def plan_and_generate(
@@ -41,6 +181,8 @@ def plan_and_generate(
     backend: str | None = None,
     seed: int | None = None,
     out_dir: Path | None = None,
+    operation: str = "generate",
+    repair_of: Path | None = None,
     progress: ProgressCallback | None = None,
 ) -> dict[str, Any]:
     trace: list[dict[str, Any]] = []
@@ -52,29 +194,15 @@ def plan_and_generate(
 
     context = build_context(home, character, request_text, budget)
     report({"stage": "context_compiled", "reference_count": len(context.get("references", []))})
-    prompt = render_generation_prompt(context)
-    tags = infer_tags(request_text)
-    ref_rows = context.get("references", [])
-    refs = tuple(Path(r["path"]) for r in ref_rows)
-    details = tuple(
-        f"{d.get('kind', 'feature')} at {d.get('location', '')}: {d.get('description', '')}"
-        for d in context.get("visible_permanent_details", [])
-    )
-    req = GenerationRequest(
-        character=context["character"],
-        prompt=prompt,
-        reference_paths=refs,
-        reference_ids=tuple(str(r.get("id", "")) for r in ref_rows),
-        reference_roles=tuple(str(r.get("role", "")) for r in ref_rows),
-        reference_tiers=tuple(str(r.get("tier", "")) for r in ref_rows),
-        visible_permanent_details=details,
-        scene_tags=tuple(sorted(tags)),
-        aspect=_aspect_from_tags(tags),
+    req = _request_from_context(
+        context,
+        request_text,
         budget=budget,
         seed=seed,
         out_dir=out_dir,
+        operation=operation,
+        repair_of=repair_of,
     )
-
     probe, provider = safe_comfy_probe()
     _, profile = load_profile(home, character)
     preference = get_backend_preference(profile)
@@ -100,44 +228,99 @@ def plan_and_generate(
     else:
         mode = backend
 
-    chosen, warnings = select_backend(mode, req, probe)
-    report({"stage": "backend_selected", "requested": mode, "backend": chosen})
-
-    if chosen == "comfyui" and provider is not None:
-        result = provider.generate(req, progress=report)
-        if result.status == "failed" and mode == "auto":
-            warnings.append(f"comfyui failed ({result.error}); fell back to Codex image_gen")
-            report({"stage": "fallback_planned", "from": "comfyui", "to": "codex_builtin"})
-            result = CodexBuiltinProvider().generate(req, progress=report)
-    else:
-        if chosen == "comfyui":
-            warnings.append("comfyui selected but provider unavailable")
-            if mode != "auto":
-                report({"stage": "provider_failed", "backend": "comfyui", "error": "provider unavailable"})
-                result = GenerationResult(
-                    backend="comfyui",
-                    status="failed",
-                    error="Local ComfyUI was explicitly selected but is unavailable.",
-                )
-            else:
-                report({"stage": "fallback_planned", "from": "comfyui", "to": "codex_builtin"})
-                result = CodexBuiltinProvider().generate(req, progress=report)
-        else:
-            result = CodexBuiltinProvider().generate(req, progress=report)
-
-    result.warnings = list(warnings) + list(result.warnings)
+    result = _execute(
+        req,
+        preference=preference,
+        mode=mode,
+        probe=probe,
+        provider=provider,
+        report=report,
+    )
     return {
         "result": result,
         "context": context,
-        "backend_selected": chosen,
+        "backend_selected": result.plan.get("primary_provider"),
         "backend_effective": result.backend,
         "backend_dialog": dialog,
         "trace": trace,
     }
 
 
+def plan_seed_generation(
+    home: Path,
+    character: str,
+    description: str,
+    *,
+    budget: str = "balanced",
+    backend: str | None = None,
+    seed: int | None = None,
+    out_dir: Path | None = None,
+    progress: ProgressCallback | None = None,
+) -> dict[str, Any]:
+    """Plan/create the first identity seed without requiring a trusted reference."""
+    trace: list[dict[str, Any]] = []
+
+    def report(event: dict[str, Any]) -> None:
+        trace.append(dict(event))
+        if progress is not None:
+            progress(dict(event))
+
+    _, profile = load_profile(home, character)
+    req = _seed_request(profile["id"], description, budget=budget, seed=seed, out_dir=out_dir)
+    report({"stage": "seed_contract_compiled", "reference_count": 0})
+    probe, provider = safe_comfy_probe()
+    preference = get_backend_preference(profile)
+    local_ready, _ = comfy_ready(probe)
+    local_bootstrap = bool(local_ready and provider is not None and provider.available_for(req)[0])
+
+    if backend is not None:
+        mode = backend
+    elif preference in {"auto", "hybrid", "comfyui", "codex_builtin"}:
+        mode = preference
+    elif local_bootstrap:
+        dialog = {
+            "stage": "choose_backend",
+            "needs_user_choice": True,
+            "user_message": "Both engines can create the first character seed. Do you want local ComfyUI, Codex image generation, hybrid/automatic planning, or should I ask each time?",
+            "choices": ["comfyui", "codex_builtin", "hybrid", "auto"],
+        }
+        report({"stage": "backend_choice_required", "preference": preference, "operation": "bootstrap"})
+        result = GenerationResult(backend="", status="needs_backend_choice",
+                                  error="Seed backend choice is required before generation.")
+        return {"result": result, "context": None, "backend_selected": None,
+                "backend_effective": None, "backend_dialog": dialog, "trace": trace}
+    else:
+        mode = "codex_builtin"
+
+    if mode == "comfyui" and not local_bootstrap:
+        result = GenerationResult(
+            backend="comfyui",
+            status="needs_backend_setup",
+            error="Local text-to-image bootstrap is not installed/ready.",
+            handoff={
+                "setup": "aice comfy setup --capabilities bootstrap",
+                "then": "aice comfy doctor --smoke",
+                "alternative": "codex_builtin",
+            },
+        )
+        report({"stage": "backend_setup_required", "backend": "comfyui", "operation": "bootstrap"})
+        return {"result": result, "context": None, "backend_selected": "comfyui",
+                "backend_effective": None, "backend_dialog": None, "trace": trace}
+
+    result = _execute(
+        req,
+        preference=preference,
+        mode=mode,
+        probe=probe,
+        provider=provider,
+        report=report,
+    )
+    return {"result": result, "context": None,
+            "backend_selected": result.plan.get("primary_provider"),
+            "backend_effective": result.backend, "backend_dialog": None, "trace": trace}
+
+
 def result_ledger_row(result: GenerationResult) -> dict[str, Any]:
-    """Reproducibility payload for the existing `aice record --validation` slot."""
     return {
         "backend": result.backend,
         "model_id": result.model_id,
@@ -146,5 +329,7 @@ def result_ledger_row(result: GenerationResult) -> dict[str, Any]:
         "duration_s": round(result.duration_s, 2),
         "effective_settings": result.effective_settings,
         "reproducibility": result.reproducibility,
+        "plan": result.plan,
+        "handoff": result.handoff,
         "warnings": result.warnings,
     }

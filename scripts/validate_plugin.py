@@ -19,7 +19,10 @@ skill = skill_dir / "SKILL.md"
 assert skill.is_file(), skill
 text = skill.read_text(encoding="utf-8")
 assert text.startswith("---\nname: ai-char-engine\n")
-assert "interactive" in text.casefold()
+# Product wording evolved from "interactive" to "conversational" in v0.4; both
+# describe the same user-facing contract. Validate the behavior rather than a stale keyword.
+lower = text.casefold()
+assert "interactive" in lower or "conversational" in lower
 assert len(text) < 9000, "SKILL.md should stay compact; move cold-path details to references/"
 
 openai_yaml = skill_dir / "agents" / "openai.yaml"

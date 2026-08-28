@@ -1,26 +1,35 @@
-"""Image generation providers.
+"""Image generation provider contracts.
 
-The Character Brain (brain.py / engine.py / selector.py) decides *what* to draw and
-*which* references to use. A provider only turns an already-compiled request into an
-image. ComfyUI is one provider; Codex built-in ``image_gen`` is the always-available
-fallback.
+AICE owns identity truth, trust and reference selection. Providers are interchangeable
+workers. The capability planner may coordinate them, but no provider can promote its
+own output or bypass Character Brain lineage rules.
 """
 
 from .base import (
     EffectiveSettings,
+    GenerationPlan,
     GenerationRequest,
     GenerationResult,
     ImageProvider,
+    PlanStage,
+    ProviderCapabilities,
+    ReferenceInput,
 )
 from .codex_builtin import CodexBuiltinProvider
+from .planner import build_plan
 from .router import BackendProbe, select_backend
 
 __all__ = [
     "EffectiveSettings",
+    "GenerationPlan",
     "GenerationRequest",
     "GenerationResult",
     "ImageProvider",
+    "PlanStage",
+    "ProviderCapabilities",
+    "ReferenceInput",
     "CodexBuiltinProvider",
     "BackendProbe",
+    "build_plan",
     "select_backend",
 ]

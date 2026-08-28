@@ -43,7 +43,7 @@ class InstallTests(unittest.TestCase):
             second = module.install(home, run_pip=False, source=ROOT)
             self.assertEqual(first["action"], "installed")
             self.assertEqual(second["action"], "updated")
-            self.assertEqual(second["version"], "0.3.0")
+            self.assertEqual(second["version"], "0.4.0")
             self.assertTrue((home / "plugins" / "ai-char-engine" / ".codex-plugin" / "plugin.json").is_file())
             market = json.loads((home / ".agents" / "plugins" / "marketplace.json").read_text(encoding="utf-8"))
             self.assertEqual(len([p for p in market["plugins"] if p["name"] == "ai-char-engine"]), 1)

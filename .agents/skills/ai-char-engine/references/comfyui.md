@@ -1,94 +1,121 @@
 # Local ComfyUI image backend
 
-Load this only for local setup, local-generation execution detail, or recovery. The user should never need to operate ComfyUI directly.
+Load this only for local setup/execution/recovery. The normal user never operates ComfyUI, chooses nodes, or manages model files.
 
 ## Role
 
-ComfyUI is an optional local pixel backend behind AI Character Engine. It does not own Character Brain state, reference trust, provenance, prompt policy, or validation. AICE compiles the request first, then hands only selected golden/trusted references to the provider.
+ComfyUI is a local pixel worker behind AICE. Character Brain, trust, reference selection, provenance and validation remain provider-neutral. A trusted reference may have originated from the user, Codex built-in generation, or ComfyUI; origin records lineage but never grants trust.
 
-The user can choose conversationally between:
-- `comfyui` — force local generation; never silently switch to Codex if it fails;
-- `codex_builtin` — use Codex built-in `image_gen` and never start ComfyUI;
-- `auto` — use validated local generation when viable, with bounded fallback to built-in generation;
-- `ask_each_time` — ask only when both engines are actually viable.
+Normal strategies:
+- `comfyui` — force local for this request/default; never silently switch if it fails;
+- `codex_builtin` — built-in `image_gen`; never start ComfyUI;
+- `auto` — capability-aware primary selection with bounded fallback/optional cross-provider assistance;
+- one-shot `hybrid` — explicitly allow the planner to use the best primary plus at most one justified cross-provider stage;
+- `ask_each_time` — ask only when both relevant choices are viable.
 
-## Current validated local stack
+## Identity/reference stack
 
-The 8 GB RTX 5070 Laptop profile is intentionally conservative because real smoke testing showed that GPU VAE decode could exhaust the card after sampling.
+The tuned 8 GB RTX 5070 Laptop identity path remains conservative:
+- Qwen-Image-Edit-2509 via `ComfyUI-GGUF`;
+- Q3_K_M default + 8-step Lightning;
+- native multi-image edit conditioning, up to 3 provider inputs;
+- ~1 MP scene buckets, batch 1;
+- low-VRAM / VRAM reserve / CPU VAE decode policy on 8 GB;
+- localhost `127.0.0.1` only;
+- runtime/models outside Git under AICE local runtime paths.
 
-- Qwen-Image-Edit-2509 via `ComfyUI-GGUF`
-- Q3_K_M is the 8 GB default; Q4_K_S remains available for larger/tuned profiles
-- fused 8-step Lightning LoRA; Euler + simple scheduler; CFG 1.0
-- native `TextEncodeQwenImageEditPlus` multi-image identity conditioning, up to 3 selected refs
-- ~1 MP scene buckets, batch size 1
-- `--lowvram`, VRAM reserve, PyTorch cross-attention and CPU VAE decode on the 8 GB profile
-- one custom node family: `ComfyUI-GGUF`
-- runtime, venv, models and logs live under `~/.aice/runtime` / configured local model paths, never in Git
-- server is localhost-only (`127.0.0.1`)
+This path handles normal identity generation, reference expansion and targeted edit/repair from trusted references.
 
-The initial no-reference character seed still uses Codex built-in `image_gen`: the local workflow is an edit/reference workflow and must not be advertised as a validated text-to-image seed generator.
+## Optional local character bootstrap
+
+v0.4 can also create the **first no-reference synthetic identity locally** when the user wants that capability. It is intentionally optional because it adds substantial disk usage.
+
+Bootstrap stack:
+- Qwen-Image text-to-image GGUF `qwen-image-Q3_K_M.gguf`;
+- Qwen-Image Lightning 8-step LoRA;
+- shared Qwen 2.5 VL text encoder + Qwen Image VAE;
+- versioned `qwen_text_to_image` API workflow;
+- no reference required.
+
+Codex installs it internally only when requested/needed:
+
+```text
+aice comfy setup --capabilities bootstrap
+aice comfy doctor --smoke
+```
+
+The bootstrap models are not part of the default required download. Do not claim a newer model family is locally supported merely because it exists upstream; only advertise workflows actually present, pinned and runnable by this plugin.
+
+If local bootstrap is unavailable, built-in `image_gen` remains a valid first-seed provider. After the user approves that seed, ComfyUI may use it as a golden identity reference and derive missing views. The inverse is also true: a Comfy-created approved seed may later be used by built-in generation.
+
+## Trust / interoperability
+
+Provider origin and trust are separate axes:
+
+```text
+user upload ----------------------> golden
+Codex/Comfy first seed + approval -> golden
+Codex/Comfy derived output --------> candidate -> quality gate -> trusted/golden
+```
+
+Rules:
+- provider output never self-promotes;
+- candidate/rejected images never condition normal generation;
+- generated derivatives require trusted parent IDs;
+- cross-provider reuse is allowed only after the same trust gate;
+- a repair target is an edit target, not automatically an identity reference.
 
 ## Setup and validation
 
-Codex runs these internally; never make the normal user copy them:
+Default local identity setup:
 
 ```text
 aice comfy setup
 aice comfy doctor --smoke
 ```
 
-Setup is idempotent: intact runtime/model assets are reused. The smoke test performs a real GPU generation and only then marks local generation validated. If the smoke test fails, local generation stays unavailable/degraded and `auto` does not pretend it is ready.
+Optional bootstrap download:
 
-Do not repeatedly rerun setup or smoke tests during ordinary generation. Use them only for initial setup or real recovery.
+```text
+aice comfy setup --capabilities bootstrap
+aice comfy doctor --smoke
+```
 
-## Normal generation
+Setup is idempotent, revision-pinned and disk-aware. Intact weights are reused. Optional capability downloads are included in disk preflight rather than hidden behind the base install estimate.
 
-The main skill uses the provider-neutral command:
+A failed smoke keeps automatic local routing degraded. Do not repeatedly rerun setup/smoke during ordinary requests.
+
+## Execution
+
+Normal provider-neutral command:
 
 ```text
 aice generate <character> "<request>" --budget balanced --progress
 ```
 
-Use `--backend comfyui|codex_builtin|auto` only for a one-shot explicit user choice. Saved defaults are managed through the hidden `aice backend` commands.
-
-ComfyUI generation stages are factual coarse events, not progress percentages:
+Useful one-shot variants:
 
 ```text
-context_compiled
-backend_selected
-local_backend_starting
-settings_resolved
-references_uploading
-workflow_preparing
-workflow_submitted
-rendering
-output_fetching
-provider_complete
+aice generate <character> "<request>" --backend hybrid --progress
+aice generate <character> "<reference view>" --operation reference_expand --progress
+aice generate <character> "<targeted correction>" --operation repair --repair-of <image> --progress
+aice seed-generate <character> "<description>" --backend comfyui --progress
 ```
 
-A bounded recovery may emit `recovering`; a real failure emits `provider_failed`. Automatic mode may emit `fallback_planned`, after which the result becomes a built-in `image_gen` plan.
+Codex invokes these; never teach them to normal users unless they request developer detail.
 
-Codex should translate only useful events into natural language. Do not dump raw events unless debugging is requested and do not invent an ETA.
+## Generation trace
 
-## Fallback semantics
+Factual stages may include:
+`seed_contract_compiled`, `context_compiled`, `plan_resolved`, `backend_selected`, `backend_setup_required`, `local_backend_starting`, `settings_resolved`, `references_uploading`, `workflow_preparing`, `workflow_submitted`, `rendering`, `output_fetching`, `provider_complete`, `recovering`, `provider_failed`, `fallback_planned`.
 
-- `auto`: ComfyUI runtime failure -> one safe provider recovery -> built-in plan if local still fails.
-- explicit/saved `comfyui`: local failure stays a failure; ask the user before using built-in generation.
-- explicit/saved `codex_builtin`: no ComfyUI startup.
-- unset/`ask_each_time` with both engines ready: ask before spending compute.
-- unset/`ask_each_time` with only built-in viable: do not ask a pointless question.
+No fake percentages or ETAs.
 
-## Diagnostics
+## Failure semantics
 
-`aice doctor` keeps core plugin health independent from optional local generation and reports `local_image_backend` as unavailable/degraded/available.
+- explicit/saved `comfyui`: failure remains local; ask before another provider;
+- `auto`/one-shot `hybrid`: one bounded local recovery, then planner-authorized fallback if needed;
+- built-in explicit: do not start ComfyUI;
+- unset/ask-each-time: ask only if the relevant local capability is actually viable.
 
-Use internally when needed:
-
-```text
-aice comfy status
-aice comfy doctor
-aice comfy start
-aice comfy stop
-```
-
-Never kill processes the AICE runtime did not start. Never expose ComfyUI to LAN/Internet by default. Never commit runtime/model/generated/private state.
+Never kill unrelated processes, expose the server to LAN/Internet, or commit runtime/model/private state.

@@ -4,22 +4,22 @@ from dataclasses import dataclass
 
 from .base import GenerationRequest
 
-VALID_MODES = ("auto", "comfyui", "codex_builtin")
+# Kept for compatibility with v0.3 callers/tests. v0.4 orchestration uses planner.py.
+VALID_MODES = ("auto", "hybrid", "comfyui", "codex_builtin")
 
 
 @dataclass(frozen=True)
 class BackendProbe:
-    """Raw facts about the local backend. Gathered by comfy.runtime / comfy.models;
-    the router turns them into a decision without any I/O of its own."""
+    """Raw local-backend facts. The capability planner owns operation-level choice."""
 
     installed: bool = False
     configured: bool = False
-    validated: bool = False  # a real GPU smoke test has passed at least once
+    validated: bool = False
     models_present: bool = False
     nodes_present: bool = False
-    server_ok: bool = False  # server answers /system_stats right now
-    can_start: bool = True  # runtime believes a lazy start would succeed
-    free_vram_mb: int | None = None  # None = unknown (server down); checked post-start
+    server_ok: bool = False
+    can_start: bool = True
+    free_vram_mb: int | None = None
     vram_floor_mb: int = 3500
 
 
@@ -41,26 +41,16 @@ def comfy_ready(p: BackendProbe) -> tuple[bool, str]:
     return True, "ready"
 
 
-def select_backend(
-    mode: str, req: GenerationRequest, probe: BackendProbe
-) -> tuple[str, list[str]]:
-    """Return (backend_name, warnings). Never raises for a bad mode -> defaults to auto.
-
-    The caller (cli `comfy generate`) is responsible for the runtime fallback: if the
-    chosen backend is comfyui and it errors at generation time, retry codex_builtin
-    unless the user explicitly forced comfyui.
-    """
-
+def select_backend(mode: str, req: GenerationRequest, probe: BackendProbe) -> tuple[str, list[str]]:
+    """Legacy single-stage routing. `hybrid` maps to auto for old callers."""
     mode = mode if mode in VALID_MODES else "auto"
     ready, why = comfy_ready(probe)
-
     if mode == "codex_builtin":
         return "codex_builtin", []
     if mode == "comfyui":
         if ready:
             return "comfyui", []
         return "comfyui", [f"comfyui forced but {why}"]
-    # auto
     if ready:
         return "comfyui", []
     return "codex_builtin", [f"local backend unavailable ({why}); using Codex built-in image_gen"]
