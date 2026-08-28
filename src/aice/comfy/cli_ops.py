@@ -96,11 +96,11 @@ def doctor(*, smoke: bool = False) -> dict[str, Any]:
         checks.append({"check": name, "ok": bool(ok), "detail": detail})
 
     check("gpu_detected", hw.has_gpu, hw.gpu_name)
-    check("blackwell", hw.is_blackwell, hw.driver)
     check("runtime_installed", rt.is_installed(), str(rt.runtime_dir))
     inst = ComfyInstaller(cfg)
     ts = inst.torch_status()
     check("torch_cuda", bool(ts.get("cuda")), f"{ts.get('v', '?')} cuda={ts.get('cuda', '?')} avail={ts.get('avail')}")
+    report["blackwell"] = hw.is_blackwell  # informational: GGUF runs on any NVIDIA
     missing = modelmod.missing_required(rt.models_dir) if rt.is_installed() else ["*"]
     check("required_models", not missing, ", ".join(missing) if missing else "present")
     check("localhost_only", rt.host == "127.0.0.1", rt.base_url)
