@@ -51,25 +51,29 @@ class HardwarePolicyProfile:
 
 
 PROFILES: dict[str, HardwarePolicyProfile] = {
-    # RTX 5070 Laptop, 8 GB: Q4_K_S GGUF, aggressive offload, upscale only in quality.
+    # RTX 5070 Laptop, 8 GB: Q3_K_M GGUF default, VAE decode forced to CPU (the
+    # GPU decode of a ~1 MP Qwen latent with the text encoder resident overflows
+    # 8 GB and crashes the worker). Q4_K_S stays available for the quality budget.
     "rtx_5070_laptop_8gb": HardwarePolicyProfile(
         name="rtx_5070_laptop_8gb",
-        default_model=QWEN_EDIT_2509_GGUF_Q4KS,
+        default_model=QWEN_EDIT_2509_GGUF_Q3KM,
         low_vram_model=QWEN_EDIT_2509_GGUF_Q3KM,
-        server_args=("--lowvram", "--use-pytorch-cross-attention", "--reserve-vram", "0.7"),
-        vram_floor_mb=3200,
-        vram_headroom_mb=1400,
-        max_pixels=1_115_000,
+        server_args=("--lowvram", "--use-pytorch-cross-attention",
+                     "--reserve-vram", "0.9", "--cpu-vae"),
+        vram_floor_mb=3000,
+        vram_headroom_mb=1200,
+        max_pixels=1_048_576,
         upscale_budgets=("quality",),
     ),
     "blackwell_8gb": HardwarePolicyProfile(
         name="blackwell_8gb",
-        default_model=QWEN_EDIT_2509_GGUF_Q4KS,
+        default_model=QWEN_EDIT_2509_GGUF_Q3KM,
         low_vram_model=QWEN_EDIT_2509_GGUF_Q3KM,
-        server_args=("--lowvram", "--use-pytorch-cross-attention", "--reserve-vram", "0.7"),
-        vram_floor_mb=3200,
-        vram_headroom_mb=1400,
-        max_pixels=1_115_000,
+        server_args=("--lowvram", "--use-pytorch-cross-attention",
+                     "--reserve-vram", "0.9", "--cpu-vae"),
+        vram_floor_mb=3000,
+        vram_headroom_mb=1200,
+        max_pixels=1_048_576,
         upscale_budgets=("quality",),
     ),
     "blackwell_12gb_plus": HardwarePolicyProfile(
@@ -85,12 +89,12 @@ PROFILES: dict[str, HardwarePolicyProfile] = {
     # Any other NVIDIA card: same GGUF path (pure-torch dequant, no Blackwell kernels needed).
     "nvidia_generic": HardwarePolicyProfile(
         name="nvidia_generic",
-        default_model=QWEN_EDIT_2509_GGUF_Q4KS,
+        default_model=QWEN_EDIT_2509_GGUF_Q3KM,
         low_vram_model=QWEN_EDIT_2509_GGUF_Q3KM,
-        server_args=("--lowvram", "--use-pytorch-cross-attention"),
-        vram_floor_mb=3600,
-        vram_headroom_mb=1600,
-        max_pixels=1_050_000,
+        server_args=("--lowvram", "--use-pytorch-cross-attention", "--cpu-vae"),
+        vram_floor_mb=3400,
+        vram_headroom_mb=1400,
+        max_pixels=1_048_576,
         upscale_budgets=("quality",),
     ),
     "cpu_or_unknown": HardwarePolicyProfile(

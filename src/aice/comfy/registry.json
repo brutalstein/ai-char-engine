@@ -21,16 +21,6 @@
     "reason": "cu130 ships the Blackwell (sm_120) CUDA kernels the RTX 50-series needs"
   },
   "models": {
-    "qwen_image_edit_2509_gguf_q4ks": {
-      "filename": "Qwen-Image-Edit-2509-Q4_K_S.gguf",
-      "dest_subdir": "unet",
-      "url": "https://huggingface.co/QuantStack/Qwen-Image-Edit-2509-GGUF/resolve/main/Qwen-Image-Edit-2509-Q4_K_S.gguf",
-      "size_bytes": 12204309024,
-      "sha256": "07e64364812e527e0e39db3770440f76a5ed4732926c54a0a0e7da841cbe0ce6",
-      "license": "Apache-2.0",
-      "vram_class": "8gb-gguf-offload",
-      "required": true
-    },
     "qwen_image_edit_2509_gguf_q3km": {
       "filename": "Qwen-Image-Edit-2509-Q3_K_M.gguf",
       "dest_subdir": "unet",
@@ -38,7 +28,17 @@
       "size_bytes": 9764502048,
       "sha256": "8fc24bbc4f818dd767f5219f38b8011bf1f2d196b9d1c3cab8df51f8e9f3bd43",
       "license": "Apache-2.0",
-      "vram_class": "8gb-gguf-tight",
+      "vram_class": "8gb-gguf",
+      "required": true
+    },
+    "qwen_image_edit_2509_gguf_q4ks": {
+      "filename": "Qwen-Image-Edit-2509-Q4_K_S.gguf",
+      "dest_subdir": "unet",
+      "url": "https://huggingface.co/QuantStack/Qwen-Image-Edit-2509-GGUF/resolve/main/Qwen-Image-Edit-2509-Q4_K_S.gguf",
+      "size_bytes": 12204309024,
+      "sha256": "07e64364812e527e0e39db3770440f76a5ed4732926c54a0a0e7da841cbe0ce6",
+      "license": "Apache-2.0",
+      "vram_class": "12gb-plus-gguf",
       "required": false
     },
     "qwen_image_edit_2509_lightning_8step": {

@@ -18,7 +18,7 @@ _ALL_NODES = {
 class RegistryTests(unittest.TestCase):
     def test_registry_has_required_models(self) -> None:
         req = [k for k, s in model_specs().items() if s.required]
-        self.assertIn("qwen_image_edit_2509_gguf_q4ks", req)
+        self.assertIn("qwen_image_edit_2509_gguf_q3km", req)
         self.assertIn("qwen_image_edit_2509_lightning_8step", req)
         self.assertIn("qwen_2.5_vl_7b_fp8_scaled", req)
         self.assertIn("qwen_image_vae", req)

@@ -129,8 +129,9 @@ def doctor(*, smoke: bool = False) -> dict[str, Any]:
     return report
 
 
-# A real generation slower than this is not usable interactively -> tune down.
-_SMOKE_LATENCY_CEILING_S = 300.0
+# Cold-start ceiling: first gen pays model load + CPU-offload staging. Warm gens
+# on a kept-alive server are far quicker; past this the default is not viable here.
+_SMOKE_LATENCY_CEILING_S = 420.0
 
 
 def _smoke_test(rt: ComfyRuntime, hw: hwmod.HardwareProfile) -> dict[str, Any]:
@@ -151,14 +152,15 @@ def _smoke_test(rt: ComfyRuntime, hw: hwmod.HardwareProfile) -> dict[str, Any]:
     attempts: dict[str, Any] = {}
     winner: str | None = None
 
+    specs = modelmod.model_specs()
     with tempfile.TemporaryDirectory() as td:
         ref = Path(td) / "smoke_ref.png"
         ref.write_bytes(_tiny_png())
         for key in candidates:
-            try:  # the tune legitimately needs this candidate now
-                ComfyInstaller(cfgmod.load_config()).ensure_models([key])
-            except InstallError as exc:
-                attempts[key] = {"ok": False, "status": "download_failed", "error": str(exc)}
+            spec = specs.get(key)
+            if not spec or not modelmod.verify(spec.dest(rt.models_dir), spec)[0]:
+                attempts[key] = {"ok": False, "status": "absent",
+                                 "error": f"{key} not downloaded (run `aice comfy setup`)"}
                 continue
             out = Path(td) / f"out_{key}"
             req = GenerationRequest(

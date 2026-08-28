@@ -214,6 +214,15 @@ class ComfyInstaller:
         self.ensure_comfy_requirements(log)
         nodes = self.ensure_custom_nodes(log)
         self.ensure_extra_model_paths()
+
+        profile_name = policymod.classify(hw.load_cached() or hw.detect())
+        if model_keys is None:  # required stack + whatever this machine's profile runs
+            prof = policymod.PROFILES[profile_name]
+            specs = modelmod.model_specs(self.registry)
+            model_keys = list(dict.fromkeys(
+                [k for k, s in specs.items() if s.required]
+                + [prof.default_model, prof.low_vram_model]
+            ))
         fetched = self.ensure_models(model_keys, progress=model_progress)
 
         self.cfg["pins"] = {
@@ -222,7 +231,7 @@ class ComfyInstaller:
             "torch": torch.get("v", ""),
             "torch_cuda": torch.get("cuda", ""),
         }
-        self.cfg["profile"] = policymod.classify(hw.load_cached() or hw.detect())
+        self.cfg["profile"] = profile_name
         cfgmod.save_config(self.cfg)
         return {
             "preflight": pre,

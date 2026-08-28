@@ -46,33 +46,36 @@ class PolicyTests(unittest.TestCase):
         hw = _hw(gpu_name="NVIDIA GeForce RTX 4070", is_blackwell=False)
         self.assertEqual(policy.classify(hw), "nvidia_generic")
         s = policy.resolve_settings(hw, budget="balanced")
-        self.assertEqual(s.model_id, policy.QWEN_EDIT_2509_GGUF_Q4KS)
+        self.assertEqual(s.model_id, policy.QWEN_EDIT_2509_GGUF_Q3KM)
 
     def test_no_gpu_is_unusable(self) -> None:
         hw = _hw(gpu_name="", has_gpu=False, is_blackwell=False)
         self.assertFalse(policy.PROFILES[policy.classify(hw)].usable)
 
-    def test_8gb_balanced_uses_q4ks_8step(self) -> None:
+    def test_8gb_balanced_uses_q3km_8step(self) -> None:
         s = policy.resolve_settings(_hw(), budget="balanced", aspect="portrait", free_vram_mb=6000)
-        self.assertEqual(s.model_id, policy.QWEN_EDIT_2509_GGUF_Q4KS)
+        self.assertEqual(s.model_id, policy.QWEN_EDIT_2509_GGUF_Q3KM)
         self.assertEqual(s.steps, 8)
         self.assertEqual(s.cfg, 1.0)
         self.assertEqual(s.batch_size, 1)
-        self.assertLessEqual(s.width * s.height, 1_115_000)
+        self.assertLessEqual(s.width * s.height, 1_048_576)
 
-    def test_economy_or_tight_vram_drops_to_low_model(self) -> None:
+    def test_8gb_server_args_force_cpu_vae(self) -> None:
+        self.assertIn("--cpu-vae", policy.server_args(_hw()))
+
+    def test_economy_or_tight_vram_stay_on_q3km(self) -> None:
         eco = policy.resolve_settings(_hw(), budget="economy", free_vram_mb=6000)
         self.assertEqual(eco.model_id, policy.QWEN_EDIT_2509_GGUF_Q3KM)
         tight = policy.resolve_settings(_hw(), budget="balanced", free_vram_mb=3800)
         self.assertEqual(tight.model_id, policy.QWEN_EDIT_2509_GGUF_Q3KM)
 
-    def test_tuned_model_overrides_default_but_not_low_vram(self) -> None:
+    def test_tuned_model_overrides_default(self) -> None:
         pinned = policy.resolve_settings(_hw(), budget="balanced", free_vram_mb=6000,
-                                         tuned_model=policy.QWEN_EDIT_2509_GGUF_Q3KM)
-        self.assertEqual(pinned.model_id, policy.QWEN_EDIT_2509_GGUF_Q3KM)
+                                         tuned_model=policy.QWEN_EDIT_2509_GGUF_Q4KS)
+        self.assertEqual(pinned.model_id, policy.QWEN_EDIT_2509_GGUF_Q4KS)
         junk = policy.resolve_settings(_hw(), budget="balanced", free_vram_mb=6000,
                                        tuned_model="not-a-real-key")
-        self.assertEqual(junk.model_id, policy.QWEN_EDIT_2509_GGUF_Q4KS)
+        self.assertEqual(junk.model_id, policy.QWEN_EDIT_2509_GGUF_Q3KM)
 
     def test_full_body_scene_changes_bucket(self) -> None:
         portrait = policy.resolve_settings(_hw(), aspect="portrait", scene_tags=("face",))
