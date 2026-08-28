@@ -43,7 +43,7 @@ class InstallerTests(unittest.TestCase):
 
     def test_preflight_rejects_low_disk(self) -> None:
         orig = modelmod.free_disk_bytes
-        modelmod.free_disk_bytes = lambda _p: 5 * 10**9  # 5 GB
+        modelmod.free_disk_bytes = lambda _p: 5 * 10**9
         try:
             with self.assertRaises(inst.InstallError):
                 self.inst.preflight()
@@ -93,6 +93,44 @@ class InstallerTests(unittest.TestCase):
 
     def test_venv_python_path_under_venv_dir(self) -> None:
         self.assertTrue(str(self.inst.venv_python).startswith(str(self.root / "venv")))
+
+    def test_registry_runtime_pins_are_exact_shas(self) -> None:
+        comfy_pin = self.inst.registry["comfyui"]["pin"]
+        node_pin = self.inst.registry["custom_nodes"][0]["pin"]
+        self.assertEqual(len(comfy_pin), 40)
+        self.assertEqual(len(node_pin), 40)
+        int(comfy_pin, 16)
+        int(node_pin, 16)
+
+    def test_exact_pinned_checkout_is_network_noop(self) -> None:
+        target = self.root / "repo"
+        (target / ".git").mkdir(parents=True)
+        calls: list[list[str]] = []
+        orig_sha, orig_run = inst._git_sha, inst._run
+        inst._git_sha = lambda _p: "a" * 40
+        inst._run = lambda cmd, **_kw: calls.append(cmd) or ""
+        try:
+            got = inst._ensure_pinned_repo("https://example.invalid/repo.git", target, "a" * 40)
+            self.assertEqual(got, "a" * 40)
+            self.assertEqual(calls, [])
+        finally:
+            inst._git_sha, inst._run = orig_sha, orig_run
+
+    def test_mismatched_checkout_fetches_and_detaches_exact_pin(self) -> None:
+        target = self.root / "repo"
+        (target / ".git").mkdir(parents=True)
+        calls: list[list[str]] = []
+        shas = iter(["b" * 40, "a" * 40])
+        orig_sha, orig_run = inst._git_sha, inst._run
+        inst._git_sha = lambda _p: next(shas)
+        inst._run = lambda cmd, **_kw: calls.append(cmd) or ""
+        try:
+            got = inst._ensure_pinned_repo("https://example.invalid/repo.git", target, "a" * 40)
+            self.assertEqual(got, "a" * 40)
+            self.assertTrue(any("fetch" in cmd for cmd in calls))
+            self.assertTrue(any("checkout" in cmd for cmd in calls))
+        finally:
+            inst._git_sha, inst._run = orig_sha, orig_run
 
 
 if __name__ == "__main__":
