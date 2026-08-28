@@ -7,6 +7,10 @@ from typing import Any, Callable
 
 MAX_PROVIDER_REFERENCES = 3
 VALID_OPERATIONS = {"generate", "bootstrap", "reference_expand", "repair"}
+# Content explicitness, decided by aice.intent before the request is built. Only
+# ``explicit`` changes routing (forces the local ComfyUI adult profile); the
+# ``disallowed`` bucket is refused by the orchestrator and never reaches a request.
+VALID_EXPLICITNESS = {"normal", "suggestive", "explicit"}
 ProgressCallback = Callable[[dict[str, Any]], None]
 
 
@@ -55,6 +59,9 @@ class ProviderCapabilities:
     max_references: int | None = None
     local: bool = False
     privacy: str = "host"
+    # True only for a provider that can run the local explicit-adult profile
+    # (LUSTIFY SDXL). Built-in cloud image generation is never adult_explicit.
+    adult_explicit_generation: bool = False
 
     def supports(self, operation: str, reference_count: int = 0) -> bool:
         if operation == "bootstrap":
@@ -76,6 +83,7 @@ class ProviderCapabilities:
             "max_references": self.max_references,
             "local": self.local,
             "privacy": self.privacy,
+            "adult_explicit_generation": self.adult_explicit_generation,
         }
 
 
@@ -141,6 +149,7 @@ class GenerationRequest:
     aspect: str = "portrait"
     budget: str = "balanced"
     operation: str = "generate"
+    explicit: str = "normal"  # normal | suggestive | explicit (see aice.intent)
     seed: int | None = None
     repair_of: Path | None = None
     out_dir: Path | None = None
@@ -149,6 +158,8 @@ class GenerationRequest:
     def __post_init__(self) -> None:
         if self.operation not in VALID_OPERATIONS:
             raise ValueError(f"operation must be one of: {', '.join(sorted(VALID_OPERATIONS))}")
+        if self.explicit not in VALID_EXPLICITNESS:
+            raise ValueError(f"explicit must be one of: {', '.join(sorted(VALID_EXPLICITNESS))}")
 
     def normalized_references(self) -> tuple[ReferenceInput, ...]:
         if self.references:
@@ -187,6 +198,9 @@ class EffectiveSettings:
     batch_size: int = 1
     upscale: bool = False
     vram_flags: tuple[str, ...] = ()
+    # Identity-adapter strength for SDXL adult profiles (IP-Adapter); 0.0 for the
+    # Qwen identity path, which conditions natively and ignores this.
+    ipadapter_weight: float = 0.0
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -200,6 +214,7 @@ class EffectiveSettings:
             "batch_size": self.batch_size,
             "upscale": self.upscale,
             "vram_flags": list(self.vram_flags),
+            "ipadapter_weight": self.ipadapter_weight,
         }
 
 
