@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "note": "Model stack for the Qwen-Image-Edit-2509 GGUF identity workflow. Files download to <models_dir>/<dest_subdir>/<filename>. Sizes/hashes pin the exact revision; installer verifies before use. Nothing here is committed as a binary.",
+  "comfyui": {
+    "repo": "https://github.com/comfyanonymous/ComfyUI.git",
+    "pin": "master",
+    "min_version": "0.3.60"
+  },
+  "custom_nodes": [
+    {
+      "name": "ComfyUI-GGUF",
+      "repo": "https://github.com/city96/ComfyUI-GGUF.git",
+      "pin": "main",
+      "required_class_types": ["UnetLoaderGGUF"],
+      "license": "Apache-2.0"
+    }
+  ],
+  "torch": {
+    "index_url": "https://download.pytorch.org/whl/cu130",
+    "packages": ["torch", "torchvision", "torchaudio"],
+    "reason": "cu130 ships the Blackwell (sm_120) CUDA kernels the RTX 50-series needs"
+  },
+  "models": {
+    "qwen_image_edit_2509_gguf_q3km": {
+      "filename": "Qwen-Image-Edit-2509-Q3_K_M.gguf",
+      "dest_subdir": "unet",
+      "url": "https://huggingface.co/QuantStack/Qwen-Image-Edit-2509-GGUF/resolve/main/Qwen-Image-Edit-2509-Q3_K_M.gguf",
+      "size_bytes": 9764502048,
+      "sha256": "8fc24bbc4f818dd767f5219f38b8011bf1f2d196b9d1c3cab8df51f8e9f3bd43",
+      "license": "Apache-2.0",
+      "vram_class": "8gb-gguf",
+      "required": true
+    },
+    "qwen_image_edit_2509_gguf_q4ks": {
+      "filename": "Qwen-Image-Edit-2509-Q4_K_S.gguf",
+      "dest_subdir": "unet",
+      "url": "https://huggingface.co/QuantStack/Qwen-Image-Edit-2509-GGUF/resolve/main/Qwen-Image-Edit-2509-Q4_K_S.gguf",
+      "size_bytes": 12204309024,
+      "sha256": "07e64364812e527e0e39db3770440f76a5ed4732926c54a0a0e7da841cbe0ce6",
+      "license": "Apache-2.0",
+      "vram_class": "12gb-plus-gguf",
+      "required": false
+    },
+    "qwen_image_edit_2509_lightning_8step": {
+      "filename": "Qwen-Image-Edit-2509-Lightning-8steps-V1.0-bf16.safetensors",
+      "dest_subdir": "loras",
+      "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Edit-2509/Qwen-Image-Edit-2509-Lightning-8steps-V1.0-bf16.safetensors",
+      "size_bytes": 849608296,
+      "sha256": "b5c48ba90d22294cc4e20ea4a347496e2136295ad438ff79ad4fe841f28d7f72",
+      "license": "Apache-2.0",
+      "vram_class": "small",
+      "required": true
+    },
+    "qwen_2.5_vl_7b_fp8_scaled": {
+      "filename": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+      "dest_subdir": "text_encoders",
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+      "size_bytes": 9384670680,
+      "sha256": "cb5636d852a0ea6a9075ab1bef496c0db7aef13c02350571e388aea959c5c0b4",
+      "license": "Apache-2.0",
+      "vram_class": "cpu-offloaded",
+      "required": true
+    },
+    "qwen_image_vae": {
+      "filename": "qwen_image_vae.safetensors",
+      "dest_subdir": "vae",
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors",
+      "size_bytes": 253806246,
+      "sha256": "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f",
+      "license": "Apache-2.0",
+      "vram_class": "small",
+      "required": true
+    }
+  }
+}

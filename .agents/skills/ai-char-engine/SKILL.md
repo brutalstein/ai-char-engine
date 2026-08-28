@@ -15,7 +15,7 @@ Act like a polished interactive product, not a CLI tutorial. The user should nev
 - Start/resume every workflow by running `aice guide [character]`; treat its `stage` as the deterministic onboarding state.
 - Ask only the question needed for the current stage. Do not front-load a questionnaire.
 - The user may upload **any number of reference photos**. Process each one, then continue accepting more until they say they are done.
-- Default image backend is Codex built-in `image_gen`; do not require an OpenAI API key.
+- Image backend is auto-routed: the local ComfyUI backend when it is installed and validated, otherwise Codex built-in `image_gen`. Never require an OpenAI API key. Read `references/comfyui.md` only when setting up or debugging local generation.
 - Keep `.aice/` private/local. Never commit character photos or identity state.
 - Adult synthetic/original/authorized characters only. Do not use the workflow to impersonate a real person without permission.
 
@@ -90,7 +90,7 @@ For full onboarding mechanics and the initial generated-seed exception, read `re
 2. If `coverage_gaps` contains geometry that matters to the request, lazily expand only that missing coverage; do not fake confidence.
 3. Load only the selected golden/trusted reference images.
 4. Run `aice prompt <character> "<request>" --budget balanced` and use it as the base image prompt. At most one small semantic refinement is allowed.
-5. Call built-in `image_gen` once.
+5. Generate once. If the local backend is ready, run `aice comfy generate <character> "<request>" --budget balanced` and use its `output_path`. Otherwise (or on a `planned`/fallback result) call built-in `image_gen` once with the prompt and selected references.
 6. Validate according to the returned budget policy. Use `pass/warn/fail`, not fake similarity percentages.
 7. If a hard invariant fails and `max_repairs` allows it, perform one targeted edit only. Never loop indefinitely.
 8. Record only the final image plus a tiny content fingerprint (`shot`, `angle`, `gaze`, `pose`, `environment`, `lighting`, `outfit`).

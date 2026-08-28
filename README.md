@@ -33,6 +33,21 @@ Repository:
 
 After installation, restart Codex if it asks you to refresh plugin discovery.
 
+## Local image generation (optional)
+
+By default images come from Codex's built-in generator. If you have an NVIDIA GPU
+you can also say:
+
+> Set up local image generation.
+
+Codex installs and configures a private local ComfyUI backend for your hardware,
+downloads a photorealistic identity-preserving model stack (Apache-2.0), and
+verifies it with a real test image — no nodes, checkpoints, samplers, or CLI for
+you to learn. After that the same natural-language requests generate on your GPU,
+and automatically fall back to the built-in generator whenever the local backend
+is unavailable. The runtime and model files live outside the repository in
+`~/.aice/runtime` and are never committed. You talk to Codex exactly as before.
+
 ## What onboarding feels like
 
 ### New character

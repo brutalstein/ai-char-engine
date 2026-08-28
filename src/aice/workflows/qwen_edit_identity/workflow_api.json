@@ -1,0 +1,49 @@
+{
+  "3": {
+    "class_type": "KSampler",
+    "inputs": {
+      "seed": 0, "steps": 8, "cfg": 1.0, "sampler_name": "euler",
+      "scheduler": "simple", "denoise": 1.0,
+      "model": ["75", 0], "positive": ["111", 0], "negative": ["110", 0],
+      "latent_image": ["112", 0]
+    }
+  },
+  "8": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["39", 0]}},
+  "38": {
+    "class_type": "CLIPLoader",
+    "inputs": {"clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors", "type": "qwen_image", "device": "default"}
+  },
+  "39": {"class_type": "VAELoader", "inputs": {"vae_name": "qwen_image_vae.safetensors"}},
+  "60": {"class_type": "SaveImage", "inputs": {"filename_prefix": "AICE", "images": ["8", 0]}},
+  "66": {"class_type": "ModelSamplingAuraFlow", "inputs": {"shift": 3.0, "model": ["116", 0]}},
+  "75": {"class_type": "CFGNorm", "inputs": {"strength": 1.0, "model": ["66", 0]}},
+  "112": {"class_type": "EmptySD3LatentImage", "inputs": {"width": 1024, "height": 1024, "batch_size": 1}},
+  "115": {
+    "class_type": "UnetLoaderGGUF",
+    "inputs": {"unet_name": "Qwen-Image-Edit-2509-Q4_K_S.gguf"}
+  },
+  "116": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "lora_name": "Qwen-Image-Edit-2509-Lightning-8steps-V1.0-bf16.safetensors",
+      "strength_model": 1.0,
+      "model": ["115", 0]
+    }
+  },
+  "78": {"class_type": "LoadImage", "inputs": {"image": "aice_ref_1.png"}},
+  "79": {"class_type": "ImageScaleToTotalPixels", "inputs": {"upscale_method": "lanczos", "megapixels": 1.0, "resolution_steps": 1, "image": ["78", 0]}},
+  "106": {"class_type": "LoadImage", "inputs": {"image": "aice_ref_2.png"}},
+  "107": {"class_type": "ImageScaleToTotalPixels", "inputs": {"upscale_method": "lanczos", "megapixels": 1.0, "resolution_steps": 1, "image": ["106", 0]}},
+  "108": {"class_type": "LoadImage", "inputs": {"image": "aice_ref_3.png"}},
+  "109": {"class_type": "ImageScaleToTotalPixels", "inputs": {"upscale_method": "lanczos", "megapixels": 1.0, "resolution_steps": 1, "image": ["108", 0]}},
+  "110": {
+    "class_type": "TextEncodeQwenImageEditPlus",
+    "inputs": {"prompt": "", "clip": ["38", 0], "vae": ["39", 0],
+               "image1": ["79", 0], "image2": ["107", 0], "image3": ["109", 0]}
+  },
+  "111": {
+    "class_type": "TextEncodeQwenImageEditPlus",
+    "inputs": {"prompt": "PLACEHOLDER", "clip": ["38", 0], "vae": ["39", 0],
+               "image1": ["79", 0], "image2": ["107", 0], "image3": ["109", 0]}
+  }
+}
