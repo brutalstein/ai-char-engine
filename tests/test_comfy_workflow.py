@@ -4,24 +4,53 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from aice.comfy.models import load_registry, missing_required, model_specs, verify
+from aice.comfy.models import (
+    capability_model_keys,
+    capability_ready,
+    load_registry,
+    missing_required,
+    model_specs,
+    verify,
+)
 from aice.comfy.workflow import WorkflowAdapter, WorkflowError
 
-_ALL_NODES = {
+_EDIT_NODES = {
     "UnetLoaderGGUF", "LoraLoaderModelOnly", "CLIPLoader", "VAELoader",
     "ModelSamplingAuraFlow", "CFGNorm", "TextEncodeQwenImageEditPlus",
     "EmptySD3LatentImage", "KSampler", "VAEDecode", "SaveImage",
     "LoadImage", "ImageScaleToTotalPixels",
 }
+_T2I_NODES = {
+    "UnetLoaderGGUF", "LoraLoaderModelOnly", "CLIPLoader", "VAELoader",
+    "ModelSamplingAuraFlow", "CFGNorm", "CLIPTextEncode",
+    "EmptySD3LatentImage", "KSampler", "VAEDecode", "SaveImage",
+}
 
 
 class RegistryTests(unittest.TestCase):
-    def test_registry_has_required_models(self) -> None:
+    def test_registry_has_required_identity_models(self) -> None:
         req = [k for k, s in model_specs().items() if s.required]
         self.assertIn("qwen_image_edit_2509_gguf_q3km", req)
         self.assertIn("qwen_image_edit_2509_lightning_8step", req)
         self.assertIn("qwen_2.5_vl_7b_fp8_scaled", req)
         self.assertIn("qwen_image_vae", req)
+
+    def test_bootstrap_models_are_optional_and_capability_scoped(self) -> None:
+        keys = capability_model_keys("bootstrap")
+        self.assertIn("qwen_image_t2i_gguf_q3km", keys)
+        self.assertIn("qwen_image_t2i_lightning_8step", keys)
+        specs = model_specs()
+        self.assertFalse(specs["qwen_image_t2i_gguf_q3km"].required)
+        self.assertFalse(specs["qwen_image_t2i_lightning_8step"].required)
+
+    def test_bootstrap_exact_file_metadata(self) -> None:
+        specs = model_specs()
+        model = specs["qwen_image_t2i_gguf_q3km"]
+        lora = specs["qwen_image_t2i_lightning_8step"]
+        self.assertEqual(model.size_bytes, 9679567392)
+        self.assertEqual(model.sha256, "ff96f80b90f8234e498c803965857d7850f89011dde805f83f1e80aa741bcdfb")
+        self.assertEqual(lora.size_bytes, 1698951104)
+        self.assertEqual(lora.sha256, "07b5a999881437f63124979844ba1949ce2438f65b6220628a196a7d30a4fff9")
 
     def test_all_model_urls_https_huggingface(self) -> None:
         for spec in model_specs().values():
@@ -34,6 +63,7 @@ class RegistryTests(unittest.TestCase):
     def test_missing_required_detects_absent_files(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             self.assertTrue(missing_required(Path(td)))
+            self.assertFalse(capability_ready(Path(td), "bootstrap"))
 
     def test_verify_reports_size_mismatch(self) -> None:
         spec = next(iter(model_specs().values()))
@@ -46,6 +76,7 @@ class RegistryTests(unittest.TestCase):
 
     def test_comfyui_and_torch_pins(self) -> None:
         reg = load_registry()
+        self.assertEqual(reg["schema_version"], 2)
         self.assertEqual(reg["comfyui"]["version"], "0.34.0")
         self.assertEqual(reg["comfyui"]["pin"], "12d5279438bfefc058a269eae805ceab6047777f")
         self.assertEqual(reg["custom_nodes"][0]["pin"], "6ea2651e7df66d7585f6ffee804b20e92fb38b8a")
@@ -64,11 +95,11 @@ class WorkflowAdapterTests(unittest.TestCase):
         )
 
     def test_validate_passes_with_all_nodes(self) -> None:
-        self.wf.validate(_ALL_NODES)
+        self.wf.validate(_EDIT_NODES)
 
     def test_validate_fails_with_missing_node(self) -> None:
         with self.assertRaises(WorkflowError) as ctx:
-            self.wf.validate(_ALL_NODES - {"UnetLoaderGGUF"})
+            self.wf.validate(_EDIT_NODES - {"UnetLoaderGGUF"})
         self.assertIn("UnetLoaderGGUF", str(ctx.exception))
 
     def test_render_patches_only_semantic_slots(self) -> None:
@@ -105,6 +136,23 @@ class WorkflowAdapterTests(unittest.TestCase):
     def test_extra_references_ignored(self) -> None:
         g = self._render(["a.png", "b.png", "c.png", "d.png"])
         self.assertEqual(g["108"]["inputs"]["image"], "c.png")
+
+    def test_text_to_image_bootstrap_needs_no_reference(self) -> None:
+        wf = WorkflowAdapter("qwen_text_to_image")
+        self.assertFalse(wf.requires_references)
+        wf.validate(_T2I_NODES)
+        graph = wf.render(
+            positive="original adult synthetic woman, natural portrait", negative="",
+            model_path="qwen-image-Q3_K_M.gguf", lora_name="lightning.safetensors",
+            width=896, height=1216, seed=99, steps=8, cfg=1.0,
+            sampler="euler", scheduler="simple", reference_names=[],
+            output_prefix="AICE_BOOTSTRAP",
+        )
+        self.assertEqual(graph["37"]["inputs"]["unet_name"], "qwen-image-Q3_K_M.gguf")
+        self.assertEqual(graph["73"]["inputs"]["lora_name"], "lightning.safetensors")
+        self.assertEqual(graph["6"]["inputs"]["text"], "original adult synthetic woman, natural portrait")
+        self.assertEqual(graph["58"]["inputs"]["width"], 896)
+        self.assertEqual(graph["3"]["inputs"]["seed"], 99)
 
 
 if __name__ == "__main__":
