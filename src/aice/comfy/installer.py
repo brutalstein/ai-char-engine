@@ -15,9 +15,6 @@ from . import models as modelmod
 from . import policy as policymod
 
 Progress = Callable[[str], None]
-
-# Refuse to start a fresh install below this much free space (models + torch +
-# temporary download/cache headroom). Model registry bytes are checked separately.
 MIN_FREE_GB_FRESH = 40
 _WINDOWS = os.name == "nt"
 
@@ -26,9 +23,11 @@ class InstallError(RuntimeError):
     pass
 
 
-_TRANSIENT = ("could not resolve host", "temporary failure", "connection reset",
-              "timed out", "connection timed out", "failed to connect", "network is unreachable",
-              "unable to access", "ssl", "recv failure", "gnutls_handshake")
+_TRANSIENT = (
+    "could not resolve host", "temporary failure", "connection reset", "timed out",
+    "connection timed out", "failed to connect", "network is unreachable",
+    "unable to access", "ssl", "recv failure", "gnutls_handshake",
+)
 
 
 def _run(cmd: list[str], *, cwd: Path | None = None, log: Progress | None = None,
@@ -58,30 +57,17 @@ def _git_sha(repo: Path) -> str:
         return ""
 
 
-def _ensure_pinned_repo(
-    url: str,
-    target: Path,
-    pin: str,
-    *,
-    log: Progress | None = None,
-) -> str:
-    """Ensure ``target`` is an exact detached checkout of ``pin``.
-
-    Fresh and repeated installs therefore use the same tested runtime rather than
-    whatever upstream branch head happens to exist that day. Existing exact
-    checkouts are true no-ops and require no network access.
-    """
+def _ensure_pinned_repo(url: str, target: Path, pin: str, *, log: Progress | None = None) -> str:
+    """Ensure target is an exact detached checkout of the tested revision."""
     target = target.resolve()
     if target.exists() and not (target / ".git").exists():
         raise InstallError(f"refusing to overwrite non-git directory: {target}")
     if not target.exists():
         target.parent.mkdir(parents=True, exist_ok=True)
         _run(["git", "clone", "--filter=blob:none", "--no-checkout", url, str(target)], log=log)
-
     current = _git_sha(target)
     if current == pin:
         return current
-
     _run(["git", "-C", str(target), "fetch", "--depth", "1", "origin", pin], log=log)
     _run(["git", "-C", str(target), "checkout", "--detach", "FETCH_HEAD"], log=log)
     current = _git_sha(target)
@@ -91,8 +77,6 @@ def _ensure_pinned_repo(
 
 
 def _venv_base_python() -> list[str]:
-    """A clean CPython 3.11-3.13 to build the ComfyUI venv from -- never a conda/newer
-    interpreter that merely happens to be running aice."""
     if _WINDOWS and shutil.which("py"):
         for ver in ("-3.12", "-3.13", "-3.11"):
             probe = subprocess.run(["py", ver, "-c", "import sys"], capture_output=True)
@@ -140,26 +124,45 @@ class ComfyInstaller:
     def _pip(self, *args: str, log: Progress | None = None) -> None:
         _run([str(self.venv_python), "-m", "pip", *args], log=log)
 
-    # -- idempotent steps ------------------------------------------
-    def preflight(self) -> dict[str, Any]:
+    def _default_model_keys(self, profile_name: str) -> list[str]:
+        prof = policymod.PROFILES[profile_name]
+        specs = modelmod.model_specs(self.registry)
+        return list(dict.fromkeys(
+            [k for k, s in specs.items() if s.required]
+            + [prof.default_model, prof.low_vram_model]
+        ))
+
+    def preflight(self, model_keys: list[str] | None = None) -> dict[str, Any]:
         fresh = not (self.runtime_dir / "main.py").exists()
         free_gb = round(modelmod.free_disk_bytes(self.home) / 1e9, 1)
-        # Required models + an 8 GB temporary/cache allowance. The fresh-install
-        # floor is intentionally larger to cover wheel extraction and partial files.
-        need_gb = round((modelmod.required_bytes(self.registry) + 8e9) / 1e9, 1)
+        specs = modelmod.model_specs(self.registry)
+        chosen = model_keys or [k for k, s in specs.items() if s.required]
+        unknown = [k for k in chosen if k not in specs]
+        if unknown:
+            raise InstallError(f"unknown model keys: {', '.join(unknown)}")
+        missing_bytes = sum(
+            specs[k].size_bytes for k in chosen
+            if not modelmod.verify(specs[k].dest(self.models_dir), specs[k])[0]
+        )
+        # Download .part files become the final file by rename, so they do not require
+        # double model space. Eight GB covers wheel/cache/extraction and operational slack.
+        need_gb = round((missing_bytes + 8e9) / 1e9, 1)
+        minimum_gb = max(MIN_FREE_GB_FRESH, need_gb + 5) if fresh else need_gb
         report = {
             "fresh_install": fresh,
             "free_gb": free_gb,
             "estimated_need_gb": need_gb,
+            "selected_models": chosen,
+            "missing_model_bytes": missing_bytes,
             "git": bool(shutil.which("git")),
             "nvidia_smi": bool(shutil.which("nvidia-smi")),
         }
         if not report["git"]:
             raise InstallError("git is required on PATH")
-        if fresh and free_gb < max(MIN_FREE_GB_FRESH, need_gb + 5):
+        if free_gb < minimum_gb:
             raise InstallError(
-                f"insufficient disk: {free_gb} GB free, need ~{max(MIN_FREE_GB_FRESH, need_gb + 5)} GB "
-                "including temporary headroom. Free space or set AICE_COMFY_HOME to another drive."
+                f"insufficient disk: {free_gb} GB free, need ~{minimum_gb} GB including temporary headroom. "
+                "Free space or set AICE_COMFY_HOME to another drive."
             )
         return report
 
@@ -177,10 +180,12 @@ class ComfyInstaller:
         if not self.venv_python.exists():
             return {"installed": False}
         try:
-            out = _run([str(self.venv_python), "-c",
-                        "import torch,json;print(json.dumps({'v':torch.__version__,"
-                        "'cuda':torch.version.cuda,'avail':torch.cuda.is_available(),"
-                        "'dev':(torch.cuda.get_device_name(0) if torch.cuda.is_available() else '')}))"])
+            out = _run([
+                str(self.venv_python), "-c",
+                "import torch,json;print(json.dumps({'v':torch.__version__,"
+                "'cuda':torch.version.cuda,'avail':torch.cuda.is_available(),"
+                "'dev':(torch.cuda.get_device_name(0) if torch.cuda.is_available() else '')}))",
+            ])
             return {"installed": True, **json.loads(out.strip().splitlines()[-1])}
         except (InstallError, ValueError):
             return {"installed": False}
@@ -224,6 +229,9 @@ class ComfyInstaller:
                       progress: Callable[[str, int, int], None] | None = None) -> list[str]:
         specs = modelmod.model_specs(self.registry)
         chosen = keys or [k for k, s in specs.items() if s.required]
+        unknown = [k for k in chosen if k not in specs]
+        if unknown:
+            raise InstallError(f"unknown model keys: {', '.join(unknown)}")
         fetched: list[str] = []
         for key in chosen:
             spec = specs[key]
@@ -235,29 +243,21 @@ class ComfyInstaller:
             fetched.append(key)
         return fetched
 
-    # -- orchestration -------------------------------------------
     def setup(self, *, model_keys: list[str] | None = None, log: Progress | None = None,
               model_progress: Callable[[str, int, int], None] | None = None) -> dict[str, Any]:
-        # Capture validation identity from THIS installer config before mutating it.
-        # Using cfgmod.load_config() here would make tests/custom homes accidentally
-        # compare against unrelated global user state.
         old_pins = dict(self.cfg.get("pins", {}))
-        pre = self.preflight()
+        profile_name = policymod.classify(hw.load_cached() or hw.detect())
+        if model_keys is None:
+            model_keys = self._default_model_keys(profile_name)
+        else:
+            model_keys = list(dict.fromkeys(model_keys))
+        pre = self.preflight(model_keys)
         comfy_sha = self.ensure_comfyui(log)
         self.ensure_venv(log)
         torch = self.ensure_torch(log)
         self.ensure_comfy_requirements(log)
         nodes = self.ensure_custom_nodes(log)
         self.ensure_extra_model_paths()
-
-        profile_name = policymod.classify(hw.load_cached() or hw.detect())
-        if model_keys is None:
-            prof = policymod.PROFILES[profile_name]
-            specs = modelmod.model_specs(self.registry)
-            model_keys = list(dict.fromkeys(
-                [k for k, s in specs.items() if s.required]
-                + [prof.default_model, prof.low_vram_model]
-            ))
         fetched = self.ensure_models(model_keys, progress=model_progress)
 
         new_pins = {
@@ -269,7 +269,6 @@ class ComfyInstaller:
         }
         self.cfg["pins"] = new_pins
         self.cfg["profile"] = profile_name
-        # Any changed runtime identity requires a fresh smoke test before auto-routing.
         if old_pins and old_pins != new_pins:
             self.cfg["validated"] = False
         cfgmod.save_config(self.cfg)
