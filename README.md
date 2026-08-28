@@ -263,6 +263,8 @@ aice doctor
 
 CI covers Python 3.11/3.12/3.13 on Ubuntu and Windows. GPU/large-model smoke tests remain local/opt-in because hosted CI does not provide the target RTX environment.
 
+`docs/adult-backend.md` is the developer map for the local explicit-adult path (architecture, request lifecycle, registry/workflow schemas, hardware policy, tests, extension points).
+
 ## Design principles
 
 1. **AICE owns identity; providers only render.**
