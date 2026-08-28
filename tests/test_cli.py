@@ -46,6 +46,7 @@ class CliTests(unittest.TestCase):
             payload = json.loads(result.stdout)
             self.assertFalse(payload["openai_api_key_required"])
             self.assertTrue(payload["interactive_guide"])
+            self.assertIn("Interactive choice", payload["image_backend"])
 
     def test_observe_and_brain_cli(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -61,6 +62,35 @@ class CliTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             result = self.run_cli("--home", str(home), "brain", "maya")
             self.assertEqual(json.loads(result.stdout)["resolved"]["identity"]["hair"]["color"], "black")
+
+    def test_backend_preference_roundtrip(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td) / ".aice"
+            self.assertEqual(self.run_cli("--home", str(home), "begin", "Maya", "--origin", "references").returncode, 0)
+            result = self.run_cli("--home", str(home), "backend", "set", "maya", "ask_each_time")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["preferences"]["backend"], "ask_each_time")
+            result = self.run_cli("--home", str(home), "backend", "reset", "maya")
+            self.assertEqual(json.loads(result.stdout)["preferences"]["backend"], "unset")
+
+    def test_top_level_generate_can_plan_codex_builtin(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            home = root / ".aice"
+            seed = root / "seed.png"
+            seed.write_bytes(b"seed")
+            self.assertEqual(self.run_cli("--home", str(home), "begin", "Maya", "--origin", "references").returncode, 0)
+            self.assertEqual(self.run_cli("--home", str(home), "seed", "maya", str(seed)).returncode, 0)
+            result = self.run_cli(
+                "--home", str(home), "generate", "maya", "candid cafe portrait",
+                "--backend", "codex_builtin", "--progress",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "planned")
+            self.assertEqual(payload["backend_effective"], "codex_builtin")
+            self.assertTrue(any(x["stage"] == "builtin_planned" for x in payload["trace"]))
+            self.assertIn("aice_progress", result.stderr)
 
 
 if __name__ == "__main__":
