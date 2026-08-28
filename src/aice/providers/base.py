@@ -5,10 +5,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-# The model-native hard cap on identity reference images (Qwen-Image-Edit-2509 takes
-# image1/image2/image3). Budget caps (economy=2, balanced=3, quality=4) are applied
-# upstream in selector.py; a provider still clamps to what its backend accepts.
 MAX_PROVIDER_REFERENCES = 3
+VALID_OPERATIONS = {"generate", "bootstrap", "reference_expand", "repair"}
 ProgressCallback = Callable[[dict[str, Any]], None]
 
 
@@ -19,50 +17,166 @@ def emit_progress(callback: ProgressCallback | None, stage: str, **details: Any)
 
 
 @dataclass(frozen=True)
+class ReferenceInput:
+    """Provider-neutral reference asset.
+
+    Trust is decided by AICE before this object is created. Providers may use the
+    metadata for conditioning/reproducibility, but never promote or reinterpret it.
+    """
+
+    id: str
+    path: Path
+    role: str = ""
+    tier: str = ""
+    origin_provider: str = "unknown"
+    tags: tuple[str, ...] = ()
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "path": str(self.path),
+            "role": self.role,
+            "tier": self.tier,
+            "origin_provider": self.origin_provider,
+            "tags": list(self.tags),
+        }
+
+
+@dataclass(frozen=True)
+class ProviderCapabilities:
+    """Declarative capability contract used by the planner, not marketing flags."""
+
+    provider: str
+    bootstrap_without_reference: bool = False
+    identity_generation: bool = True
+    reference_expansion: bool = True
+    targeted_repair: bool = False
+    multi_reference: bool = False
+    max_references: int | None = None
+    local: bool = False
+    privacy: str = "host"
+
+    def supports(self, operation: str, reference_count: int = 0) -> bool:
+        if operation == "bootstrap":
+            return self.bootstrap_without_reference
+        if operation == "reference_expand":
+            return self.reference_expansion and (reference_count > 0 or self.bootstrap_without_reference)
+        if operation == "repair":
+            return self.targeted_repair
+        return self.identity_generation and (reference_count > 0 or self.bootstrap_without_reference)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "provider": self.provider,
+            "bootstrap_without_reference": self.bootstrap_without_reference,
+            "identity_generation": self.identity_generation,
+            "reference_expansion": self.reference_expansion,
+            "targeted_repair": self.targeted_repair,
+            "multi_reference": self.multi_reference,
+            "max_references": self.max_references,
+            "local": self.local,
+            "privacy": self.privacy,
+        }
+
+
+@dataclass(frozen=True)
+class PlanStage:
+    name: str
+    provider: str
+    operation: str
+    required: bool = True
+    reason: str = ""
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "provider": self.provider,
+            "operation": self.operation,
+            "required": self.required,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
+class GenerationPlan:
+    """Small deterministic plan. Optional stages are permissions, not forced calls."""
+
+    strategy: str
+    primary_provider: str
+    stages: tuple[PlanStage, ...]
+    allow_cross_provider_repair: bool = False
+    allow_cross_provider_reference_reuse: bool = True
+    reason: str = ""
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "strategy": self.strategy,
+            "primary_provider": self.primary_provider,
+            "stages": [stage.as_dict() for stage in self.stages],
+            "allow_cross_provider_repair": self.allow_cross_provider_repair,
+            "allow_cross_provider_reference_reuse": self.allow_cross_provider_reference_reuse,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
 class GenerationRequest:
     """A fully compiled, backend-agnostic image request.
 
-    Everything identity-related is already resolved: ``prompt`` is the compiled
-    generation contract (see engine.render_generation_prompt) and ``reference_paths``
-    are already-selected golden/trusted images. Parallel reference metadata preserves
-    AICE provenance without making providers responsible for trust decisions.
+    ``references`` is the canonical v0.4 reference fabric. The parallel legacy fields
+    remain for v0.3 callers and are normalized automatically, so existing characters
+    and scripts keep working through the migration.
     """
 
     character: str
     prompt: str
+    references: tuple[ReferenceInput, ...] = ()
     reference_paths: tuple[Path, ...] = ()
     reference_ids: tuple[str, ...] = ()
     reference_roles: tuple[str, ...] = ()
     reference_tiers: tuple[str, ...] = ()
+    reference_origins: tuple[str, ...] = ()
     visible_permanent_details: tuple[str, ...] = ()
     scene_tags: tuple[str, ...] = ()
-    aspect: str = "portrait"  # portrait | square | full_body
-    budget: str = "balanced"  # economy | balanced | quality
-    seed: int | None = None  # None -> provider chooses and records it
-    repair_of: Path | None = None  # set only for the single bounded repair pass
+    aspect: str = "portrait"
+    budget: str = "balanced"
+    operation: str = "generate"
+    seed: int | None = None
+    repair_of: Path | None = None
     out_dir: Path | None = None
     negative: str = ""
 
-    def capped_references(self, limit: int = MAX_PROVIDER_REFERENCES) -> tuple[Path, ...]:
-        return tuple(self.reference_paths[:limit])
+    def __post_init__(self) -> None:
+        if self.operation not in VALID_OPERATIONS:
+            raise ValueError(f"operation must be one of: {', '.join(sorted(VALID_OPERATIONS))}")
 
-    def capped_reference_metadata(self, limit: int = MAX_PROVIDER_REFERENCES) -> list[dict[str, str]]:
-        paths = self.capped_references(limit)
-        rows: list[dict[str, str]] = []
-        for index, path in enumerate(paths):
-            rows.append({
-                "id": self.reference_ids[index] if index < len(self.reference_ids) else path.name,
-                "role": self.reference_roles[index] if index < len(self.reference_roles) else "",
-                "tier": self.reference_tiers[index] if index < len(self.reference_tiers) else "",
-                "path": str(path),
-            })
-        return rows
+    def normalized_references(self) -> tuple[ReferenceInput, ...]:
+        if self.references:
+            return self.references
+        rows: list[ReferenceInput] = []
+        for index, path in enumerate(self.reference_paths):
+            rows.append(ReferenceInput(
+                id=self.reference_ids[index] if index < len(self.reference_ids) else path.name,
+                path=Path(path),
+                role=self.reference_roles[index] if index < len(self.reference_roles) else "",
+                tier=self.reference_tiers[index] if index < len(self.reference_tiers) else "",
+                origin_provider=(self.reference_origins[index]
+                                 if index < len(self.reference_origins) else "unknown"),
+            ))
+        return tuple(rows)
+
+    def capped_reference_inputs(self, limit: int = MAX_PROVIDER_REFERENCES) -> tuple[ReferenceInput, ...]:
+        return self.normalized_references()[:limit]
+
+    def capped_references(self, limit: int = MAX_PROVIDER_REFERENCES) -> tuple[Path, ...]:
+        return tuple(ref.path for ref in self.capped_reference_inputs(limit))
+
+    def capped_reference_metadata(self, limit: int = MAX_PROVIDER_REFERENCES) -> list[dict[str, Any]]:
+        return [ref.as_dict() for ref in self.capped_reference_inputs(limit)]
 
 
 @dataclass(frozen=True)
 class EffectiveSettings:
-    """Concrete parameters a hardware/scene policy resolved for one generation."""
-
     model_id: str
     steps: int
     cfg: float
@@ -100,9 +214,8 @@ class GenerationResult:
     effective_settings: dict[str, Any] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     reproducibility: dict[str, Any] = field(default_factory=dict)
-    # ok       -> output_path holds a finished image
-    # planned  -> caller (Codex) must still run built-in image_gen from this payload
-    # failed   -> error is set; caller may fall back
+    plan: dict[str, Any] = field(default_factory=dict)
+    handoff: dict[str, Any] = field(default_factory=dict)
     status: str = "ok"
     error: str = ""
 
@@ -118,19 +231,30 @@ class GenerationResult:
             "effective_settings": self.effective_settings,
             "warnings": self.warnings,
             "reproducibility": self.reproducibility,
+            "plan": self.plan,
+            "handoff": self.handoff,
             "error": self.error,
         }
 
 
 class ImageProvider(abc.ABC):
-    """Backend contract. Implementations must be deterministic about process and I/O;
-    only semantic/visual judgement belongs to the Codex layer, never here."""
-
     name: str = "provider"
 
     @abc.abstractmethod
     def available(self) -> tuple[bool, str]:
         """(usable_now, human-readable reason)."""
+
+    def capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities(provider=self.name)
+
+    def available_for(self, req: GenerationRequest) -> tuple[bool, str]:
+        ok, reason = self.available()
+        if not ok:
+            return ok, reason
+        caps = self.capabilities()
+        if not caps.supports(req.operation, len(req.normalized_references())):
+            return False, f"{self.name} does not support operation {req.operation} for this request"
+        return True, reason
 
     @abc.abstractmethod
     def generate(self, req: GenerationRequest, *, progress: ProgressCallback | None = None) -> GenerationResult: ...
